@@ -1,0 +1,42 @@
+# P009 – First real Windows VST3 host QA (ROM-free)
+
+## Actual result from an independent production 125A host
+- [Windows full compile run 44823748936](https://github.com/challanger2000/125A-Akai-S3000XL-VST3/actions/runs/44823748936) **PASS**: MAME 0.288, JUCE 8.0.12, x64 VST3 link, complete VST3 bundle and public ROM-free artifact.
+- [First true Windows load probe 44828793299](https://github.com/challanger2000/125A-Akai-S3000XL-VST3/actions/runs/44828793299): LoadLibrary succeeded and VST3 `GetPluginFactory` returned non-null. The QA launcher initially pointed at a non-existent tester filename; its workflow was corrected.
+- [Corrected 125A tester run 44830191063](https://github.com/challanger2000/125A-Akai-S3000XL-VST3/actions/runs/44830191063): used existing original **125A Plugin Tester v0.3.2** artifact, invoked the portable binary via its documented hidden `--portable-test` CLI (the ordinary invocation launches a GUI), and genuinely ran the independent Steinberg VST3 SDK `v3.8.1_build_84` validator.
+
+### Verbatim QA outcome
+`RESULT: 53 PASS / 0 WARNING / 1 FAIL`, `RELEASE: NOT RECOMMENDED`.
+
+Evidence includes:
+- Factory classes and component/controller creation: PASS.
+- 1 stereo audio input bus, 1 stereo Main + 8 mono output buses, MIDI input bus: PASS.
+- Parameter metadata/count (2128), normalized/plain conversions and state roundtrip: PASS.
+- 50/50 supported sample-rate / buffer-size setups; 256 blocks of sustained audio processing: PASS (ROM-free, SILENT; **not** original Akai tone evidence).
+- Repeated VST3 component lifecycle, 5 complete module reload cycles, fresh-instance state, 5 editor attach/detach cycles: PASS.
+- `[FAIL] Steinberg VST3 validator / Scan Programs - Programlist 000->Program 000: has no name!!!`.
+
+## Correction to the actual source
+Original `Source/PluginProcessor.cpp` exposed `getNumPrograms()==1` and
+`getProgramName(0)==""`. It was a true plugin SDK compliance error, not a
+sample/firmware issue. The processor now returns the descriptive host
+placeholder `Akai S3000XL` for program index zero and an empty string for
+invalid indices. This **does not create a real Akai program/keygroup** and
+must not be mistaken for original-ROM program assignment.
+
+[Commit 06cfae4](https://github.com/challanger2000/125A-Akai-S3000XL-VST3/commit/06cfae4ecbf7c1131335ceae455e197b6c2ebcce)
+also integrates the complete original 125A v0.3.2 tester plus Steinberg
+validator **into the real full Windows build workflow**. From now on the
+full build must compile, run the actual tester and independently report
+zero FAIL/zero WARNING/official validator PASS before its status is green.
+On failure the actual host QA report is preserved as an artifact.
+
+## Acceptance boundaries
+- New fixed source requires a fresh full Windows compile and verified 125A
+  tester result. The first 53/1 failure must **never** be reclassified PASS.
+- The ROM-overlay source P008 is also awaiting its first complete Windows
+  compile, actual private pack and verified original V2.0 ROM start.
+- No original firmware boot, sample recording, WAV→Akai sample/program
+  mapping, audible MIDI output, multi-instance ROM boot, DSP fidelity,
+  project/sample recall or final Fender Studio Pro result is established by
+  these ROM-free host tests.
