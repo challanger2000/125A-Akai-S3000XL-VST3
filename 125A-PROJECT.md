@@ -1,7 +1,7 @@
 # 125A Akai S3000XL VST3 — Project notes
 
 ## Repository visibility and private build: deliberate separation
-**This GitHub repository is intentionally PUBLIC. Do not question or suggest changing its visibility merely because the resulting plugin is private.** The user wants publicly accessible source code for development and collaboration, while the **ROM-inclusive, self-contained Windows VST3 is for private personal use only**. The proprietary firmware ROMs are deliberately absent from the repository, Git history, public releases, and public CI artifacts. These two visibility choices are not contradictory. This is a fixed project decision, not an open question.
+**This GitHub repository is intentionally PUBLIC to minimize GitHub Actions CI costs (public-repository Actions runner billing), NOT for collaboration or source-code accessibility. Do not question or suggest changing its visibility merely because the resulting plugin is private.** The **ROM-inclusive, self-contained Windows VST3 is for private personal use only**. The proprietary firmware ROMs are deliberately absent from the repository, Git history, public releases, and public CI artifacts. These two visibility choices are not contradictory. This is a fixed project decision, not an open question.
 
 ## Goal
 Develop and validate a **single native Windows VST3** reproducing the Akai S3000XL hardware and firmware behavior as faithfully as practical, building on [Tuth/S3000XL-VST](https://github.com/Tuth/S3000XL-VST) v1.2 (upstream commit `d4a5042dffa26fd833eafae5c0cc9d26e69ef99e`).
