@@ -10,3 +10,6 @@ add_test(NAME akai_firmware_monitor_contract COMMAND akai_firmware_monitor_tests
 add_executable(akai_wav_input_tests AkaiWavInputTests.cpp)
 target_compile_features(akai_wav_input_tests PRIVATE cxx_std_20)
 add_test(NAME akai_wav_input_contract COMMAND akai_wav_input_tests)
+add_executable(akai_capture_controller_tests AkaiCaptureAutomationTests.cpp)
+target_compile_features(akai_capture_controller_tests PRIVATE cxx_std_20)
+add_test(NAME akai_capture_controller_contract COMMAND akai_capture_controller_tests)

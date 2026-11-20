@@ -42,6 +42,12 @@ The **user-facing workflow should match the Emulator II/III**: directly choose/l
 - The upstream save-state code visibly serializes SD-1 `osram`/`seqram` shares; that is **not a proof** S3000XL sample RAM and programs are restored correctly. True sample/project recall is a priority.
 - MAME global process state may prevent safe simultaneous VST instances, as upstream port notes warn. Verify, do not assume.
 
+## P004 firmware-guarded recording controller (source only)
+- Original-ROM strings and operator manual confirm SAMPLE/F2/ARM/GO workflow and a `- new -` unique-name gate. A read-only MAME LCD-text snapshot and fail-closed button state controller are now coded.
+- MEDIA-selected or dragged WAVs request firmware navigation; recording is allowed only after exact current LCD setup/new-name/WAITING screens and WADCS ARM state, with 120 ms key holds and explicit stop confirmation.
+- **Critical limitation:** live firmware may render REC pages in graphics mode; the new text snapshot must then reject automatic actions. No ROM-backed success has been demonstrated. An automatic unique name, record length, program/keygroup mapping and portable DAW recall are NOT implemented.
+- See `docs/P004-FIRMWARE-CAPTURE.md`. Do not call this a finished single-click playable WAV import, or a full VST3 build.
+
 ## P003 WAV source through original Akai ADC (implemented, not one-click yet)
 - WAV selection (MEDIA menu) and editor drag/drop implemented on `develop/v1.0.0`.
 - Supports RIFF/WAVE PCM 8/16/24/32, float32, mono/stereo, 8–192 kHz, bounded source sizes, no external conversion program. Transforms the decoded audio **off-thread** into host-rate PCM16 using a 32-tap windowed-sinc converter; no normalization or boosts.
@@ -69,7 +75,7 @@ The **user-facing workflow should match the Emulator II/III**: directly choose/l
 ## Development order (owner priority, 2026-11-20)
 1. Implement both physically present knobs, **REC GAIN and MAIN VOLUME**, and their actual input/Main L/R audio signal effects. **P001 source written; isolated C++ checks PASS; Windows/host gates OPEN.**
 2. Complete the original firmware **Mon** function and outstanding first-stereo-record monitoring anomaly; **P002 gated source bridge implemented, firmware/DAW validation OPEN**. Keep native firmware display and behavior.
-3. Complete **one-step direct WAV import** consistent with Emulator II/III: **P003 source loader plus firmware-GO ADC feeder coded; automatic firmware capture, Akai program/keygroup assignment, original-ROM proof and DAW sample recall still OPEN.**
+3. Complete **one-step direct WAV import** consistent with Emulator II/III: **P003 loader/ADC feeder + P004 fail-closed firmware-button controller coded**. Actual LCD readability, unique-name/length setup, program/keygroup assignment, original-ROM proof and portable DAW sample recall remain OPEN.
 4. Reproduce a native Windows x64 VST3 build with JUCE, MAME 0.288 and VS2022; replace upstream absolute F: drive paths and integrate private ROMs outside the public Git repository.
 5. Demonstrate firmware V2.0 boot, MIDI and 10 output buses, genuine recording/playback and WAV import. Validate real 32 MiB RAM, true project/sample recall and concurrent instances.
 6. Optimize sample load speed and realtime/host reliability without changing the original Akai sound path without evidence.

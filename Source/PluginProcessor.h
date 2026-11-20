@@ -40,6 +40,7 @@
 #include <mutex>
 #include <memory>
 #include "AkaiWavInput.h"
+#include "AkaiCaptureAutomation.h"
 
 //==============================================================================
 
@@ -329,6 +330,17 @@ public:
     // Double-buffered immutable assets; no locks/allocations on MAME/audio threads.
     bool stageWavForCapture(const juce::File& file, juce::String& error);
     void clearStagedWav() noexcept;
+    // The automation may only read the ACTUAL armed WAV asset after the
+    // MAME source thread has acknowledged the new immutable input slot.
+    bool wavAcceptedByEngine() const noexcept {
+        return wavState.load(std::memory_order_acquire)==1
+            && wavCurrentSlot.load(std::memory_order_acquire)>=0
+            && wavPendingSlot.load(std::memory_order_acquire)==-1;
+    }
+    // Message thread posts one-shot requests; emulation owner thread executes.
+    std::atomic<bool> autoCaptureRequest{false};
+    std::atomic<bool> autoCaptureCancel{false};
+    std::atomic<int> autoCaptureStage{int(akai::capture::Stage::Idle)};
     juce::String stagedWavName;
     std::atomic<int> wavState{0}; // 0 none, 1 armed, 2 recording, 3 source finished
     std::atomic<std::uint64_t> wavFramesDelivered{0};           // returns frames actually supplied

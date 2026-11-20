@@ -11,6 +11,7 @@
 #include "PluginProcessor.h"
 #include "AkaiAnalogControls.h"
 #include "AkaiFirmwareMonitor.h"
+#include "video/hd61830.h"
 #include "PluginEditor.h"
 
 #include <iostream>
@@ -769,6 +770,8 @@ private:
     uint64_t lastFrameHash = 0;
     uint32_t lastMouseButtons = 0;
     int audioMacroHeldBank = -1;   // audio-thread-only: which bank is electronically held
+    akai::capture::Controller captureController; // MAME/OSD owner thread only
+    int captureHeldIndex = -1; // only release buttons this controller pressed
     
     render_target* main_target = nullptr;
 
@@ -829,6 +832,8 @@ public:
         }
         if (processor != nullptr) {
                 processor->firmwareWadcsKnown.store(false, std::memory_order_release);
+                processor->autoCaptureStage.store(
+                    int(akai::capture::Stage::Cancelled),std::memory_order_release);
                 processor->mameMachine = nullptr;
             }
         osd_common_t::osd_exit();
@@ -1268,6 +1273,89 @@ public:
         
             if (mame_machine == nullptr) return;
             
+
+            // P004: safe original-Akai firmware recording operator.
+            // This is the same owner thread as ioport_field::set_value.
+            // No handwritten register manipulation, no blind timing macros.
+            {
+                const double t=mame_machine->time().as_double();
+                const std::uint64_t nowMs=(std::isfinite(t)&&t>=0.0)
+                    ? static_cast<std::uint64_t>(t*1000.0):0;
+                if(processor->autoCaptureCancel.exchange(false,std::memory_order_acq_rel)) {
+                    const auto action=captureController.cancel(nowMs);
+                    if(captureHeldIndex>=0 &&
+                       captureHeldIndex<int(processor->buttonParams.size())) {
+                        processor->buttonParams[std::size_t(captureHeldIndex)]->store(
+                            0.0f,std::memory_order_release);
+                        captureHeldIndex=-1;
+                    }
+                    processor->autoCaptureStage.store(int(action.stage),std::memory_order_release);
+                }
+                if(processor->autoCaptureRequest.exchange(false,std::memory_order_acq_rel)) {
+                    if(captureController.start(nowMs))
+                        processor->autoCaptureStage.store(
+                            int(captureController.stage()),std::memory_order_release);
+                }
+                if(captureController.isRunning()) {
+                    char lcd[321]{};
+                    auto* display=mame_machine->root_device().subdevice<hd61830_device>("lcdc");
+                    const bool valid=display!=nullptr &&
+                        display->snapshot_visible_text(lcd,sizeof(lcd));
+                    akai::capture::Observe obs;
+                    obs.readable=valid;
+                    obs.lcd=valid?std::string_view(lcd,320):std::string_view{};
+                    obs.wavReady=processor->wavAcceptedByEngine();
+                    obs.wavComplete=processor->wavState.load(std::memory_order_acquire)==3;
+                    obs.firmwareReady=processor->mameIsFullyBooted.load(
+                        std::memory_order_acquire);
+                    obs.wadcsKnown=processor->firmwareWadcsKnown.load(
+                        std::memory_order_acquire);
+                    obs.wadcs=processor->firmwareWadcsLatch.load(
+                        std::memory_order_acquire);
+                    const auto action=captureController.step(obs,nowMs);
+                    auto findIndex=[&](akai::capture::Button key) {
+                        const char* tag=nullptr;
+                        switch(key) {
+                        case akai::capture::Button::Sample:tag="btn_sample";break;
+                        case akai::capture::Button::RecF2:tag="btn_f2";break;
+                        case akai::capture::Button::ArmF8:tag="btn_f8";break;
+                        case akai::capture::Button::GoF7:tag="btn_f7";break;
+                        default:return -1;
+                        }
+                        for(size_t n=0;n<processor->sd1Buttons.size();++n)
+                            if(processor->sd1Buttons[n].paramID==tag)return int(n);
+                        return -1;
+                    };
+                    const int keyIndex=findIndex(action.button);
+                    if(action.command==akai::capture::Command::Press) {
+                        if(keyIndex>=0&&keyIndex<int(processor->buttonParams.size()) &&
+                           processor->buttonParams[std::size_t(keyIndex)]!=nullptr &&
+                           processor->buttonParams[std::size_t(keyIndex)]->load(
+                               std::memory_order_relaxed)<=0.5f) {
+                            processor->buttonParams[std::size_t(keyIndex)]->store(
+                                1.0f,std::memory_order_release);
+                            captureHeldIndex=keyIndex;
+                        } else {
+                            // A user/host already holds this key, or mapping
+                            // is absent. Never steal/release someone else's key.
+                            captureController.cancel(nowMs);
+                            processor->autoCaptureStage.store(
+                                int(akai::capture::Stage::Busy),std::memory_order_release);
+                        }
+                    } else if(action.command==akai::capture::Command::Release) {
+                        if(captureHeldIndex>=0 &&
+                           captureHeldIndex<int(processor->buttonParams.size())) {
+                            processor->buttonParams[std::size_t(captureHeldIndex)]->store(
+                                0.0f,std::memory_order_release);
+                            captureHeldIndex=-1;
+                        }
+                    }
+                    if(action.command!=akai::capture::Command::Press ||
+                       captureHeldIndex>=0)
+                        processor->autoCaptureStage.store(
+                            int(captureController.stage()),std::memory_order_release);
+                }
+            }
             // ==============================================================================
             // --- 1. MOUSE INJECTION ---
             // ==============================================================================

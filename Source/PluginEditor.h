@@ -80,6 +80,7 @@ private:
     std::unique_ptr<juce::FileChooser> fileChooser;
     void loadMediaButtonClicked();
     void importWavFile(const juce::File& file);
+    int lastCaptureNotice = 0; // UI-only, one alert per terminal result
 
     // --- SETTINGS PANEL GUI COMPONENTS ---
     juce::TextButton settingsButton { "Settings / About" };

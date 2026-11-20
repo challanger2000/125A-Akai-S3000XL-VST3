@@ -480,6 +480,49 @@ void EnsoniqSD1AudioProcessorEditor::timerCallback()
     bool checkFailed = audioProcessor.isSelfCheckFailed.load(std::memory_order_acquire);
     bool unsupportedHost = audioProcessor.isUnsupportedAUHost.load(std::memory_order_acquire);
         
+    // P004 display only original firmware-verified recording phases.
+    // GUI timer never advances the firmware or presses hardware controls.
+    const auto captureStage=static_cast<akai::capture::Stage>(
+        audioProcessor.autoCaptureStage.load(std::memory_order_acquire));
+    const bool captureActive = captureStage>=akai::capture::Stage::WaitWav
+                            && captureStage<=akai::capture::Stage::WaitStop;
+    const bool captured = captureStage==akai::capture::Stage::RecordedSample;
+    if(captureActive) {
+        if(captureStage>=akai::capture::Stage::Capturing)
+            loadMediaButton.setButtonText("WAV REC");
+        else
+            loadMediaButton.setButtonText("WAV ARM");
+    } else if(captured)
+        loadMediaButton.setButtonText("WAV DONE");
+    else
+        loadMediaButton.setButtonText("MEDIA");
+    // One precise message per failure, never a repeated modal at 30 Hz.
+    const int statusCode=int(captureStage);
+    if (statusCode>=20 && statusCode!=lastCaptureNotice) {
+        lastCaptureNotice=statusCode;
+        juce::String details;
+        if(captureStage==akai::capture::Stage::NeedNewSample)
+            details="The original Akai RECORD page did not confirm a unique NEW sample name. "
+                    "Name a new sample on the Akai panel, then MEDIA > Resume automatic WAV recording. "
+                    "Existing samples are never overwritten automatically.";
+        else if(captureStage==akai::capture::Stage::NoReadableLcd)
+            details="The firmware LCD could not be read reliably in text mode. "
+                    "No further automatic keys were sent. You may record the staged WAV manually "
+                    "with SAMPLE > REC > ARM > GO.";
+        else if(captureStage==akai::capture::Stage::OverwriteRisk)
+            details="The firmware indicated an existing sample/overwrite risk. "
+                    "The automation refused to confirm it.";
+        else if(captureStage==akai::capture::Stage::Busy)
+            details="A panel key was already held by the user/host. Automation stopped without "
+                    "taking control of that key.";
+        else if(captureStage==akai::capture::Stage::TimedOut)
+            details="The original Akai firmware did not confirm the expected page/state. "
+                    "Automatic recording was stopped without guessing.";
+        if(details.isNotEmpty())
+            juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::WarningIcon,
+                "Akai WAV recording",details);
+    }
+
     // ROM error buttons visibility
     locateRomButton.setVisible(missing);
     rescanRomButton.setVisible(missing);
@@ -1451,19 +1494,28 @@ void EnsoniqSD1AudioProcessorEditor::importWavFile(const juce::File& file)
             "Akai WAV input",error);
         return;
     }
+    // Record via original front panel, but only after the live firmware
+    // LCD confirms each page. Failure never authorizes overwriting a sample.
+    audioProcessor.autoCaptureRequest.store(true, std::memory_order_release);
+    lastCaptureNotice = 0;
+    loadMediaButton.setButtonText("WAV: READY");
+    loadMediaButton.setTooltip("Automatic Akai recording is starting. "
+       "No overwrite will be confirmed. Native program/keygroup assignment "
+       "and portable DAW recall are still under development.");
     repaint();
-    juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::InfoIcon,
-        "WAV ready for original Akai recorder",
-        file.getFileName()
-        + "\n\nOn the Akai: SAMPLE > REC > ARM > GO.\n"
-          "The WAV starts on the original firmware's GO signal.\n"
-          "Program mapping and portable DAW sample recall are not yet implemented.");
 }
 void EnsoniqSD1AudioProcessorEditor::loadMediaButtonClicked()
 {
     juce::PopupMenu m;
     m.addSectionHeader("WAV input via original Akai sampler");
-    m.addItem(20, "Load WAV for firmware sampling...");
+    m.addItem(20, "Import WAV with Akai firmware...");
+    const auto captureStage=static_cast<akai::capture::Stage>(
+        audioProcessor.autoCaptureStage.load(std::memory_order_acquire));
+    const bool captureActive = captureStage>=akai::capture::Stage::WaitWav
+                            && captureStage<=akai::capture::Stage::WaitStop;
+    m.addItem(22, "Resume automatic WAV recording", !captureActive &&
+        audioProcessor.wavState.load(std::memory_order_acquire)==1);
+    m.addItem(23, "Cancel automatic WAV recording", captureActive);
     if (audioProcessor.wavState.load(std::memory_order_acquire) != 0) {
         m.addItem(21, "Unload staged WAV");
         m.addSectionHeader("Staged: " + audioProcessor.stagedWavName);
@@ -1487,7 +1539,17 @@ void EnsoniqSD1AudioProcessorEditor::loadMediaButtonClicked()
             if (safeThis == nullptr || result == 0) return;
             auto* editor = safeThis.getComponent();
             auto& processor = editor->audioProcessor;
+            if (result == 23) {
+                processor.autoCaptureCancel.store(true,std::memory_order_release);
+                return;
+            }
+            if (result == 22) {
+                processor.autoCaptureRequest.store(true,std::memory_order_release);
+                editor->lastCaptureNotice=0;
+                return;
+            }
             if (result == 21) {
+                processor.autoCaptureCancel.store(true,std::memory_order_release);
                 processor.clearStagedWav();
                 processor.stagedWavName.clear();
                 editor->repaint();

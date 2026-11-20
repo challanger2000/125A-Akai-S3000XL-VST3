@@ -37,6 +37,16 @@ Known limitations and development work (125A branch):
   See [P002 evidence and test contract](docs/P002-FIRMWARE-MONITOR.md).
 * Sample **loading** is slower than the hardware, a known cost of getting the transfer rate right.
 
+### 125A P004 – cautious original-firmware record automation
+
+Source code on `develop/v1.0.0` now includes a MAME-owner-thread operator that
+checks the live Akai LCD text, unique sample name and WADCS recorder state
+before pressing the original SAMPLE / REC / ARM / GO buttons. The operator
+must **abort** if firmware LCD graphic mode prevents safe text recognition.
+It does not automatically set names, record length or MIDI keygroups, and
+it is **not tested against the private Akai V2.0 ROM or built as a full VST3**.
+See [P004 test contract](docs/P004-FIRMWARE-CAPTURE.md).
+
 ### 125A P003 – WAV input into the original Akai recorder
 
 On `develop/v1.0.0`, the MEDIA menu can select a WAV file and the panel accepts WAV drag/drop.

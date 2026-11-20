@@ -3270,3 +3270,59 @@ index cfb19bc6..2e060578 100644
  
  const char * emulator_info::get_appname() { return nullptr; }
  
+diff --git a/src/devices/video/hd61830.h b/src/devices/video/hd61830.h
+--- a/src/devices/video/hd61830.h
++++ b/src/devices/video/hd61830.h
+@@ -34,6 +34,10 @@
+ 	uint8_t data_r();
+ 	void data_w(uint8_t data);
+ 
++	// Read-only snapshot of the CURRENT 40x8 text LCD (320 bytes + terminator).
++	// Returns false in graphics mode or when display geometry is incompatible.
++	// Must be called on the MAME owner thread; no write to hardware state.
++	bool snapshot_visible_text(char* dest, unsigned capacity);
+ 	uint32_t screen_update(screen_device &screen, bitmap_ind16 &bitmap, const rectangle &cliprect);
+ 
+ protected:
+diff --git a/src/devices/video/hd61830.cpp b/src/devices/video/hd61830.cpp
+--- a/src/devices/video/hd61830.cpp
++++ b/src/devices/video/hd61830.cpp
+@@ -343,6 +343,38 @@
+ //  draw_scanline - draw one graphics scanline
+ //-------------------------------------------------
+ 
++// [125A P004] Read-only visible LCD text for fail-closed original-firmware
++// capture automation. Graphic-mode pages are deliberately NOT decoded;
++// the host must never guess at their soft-key meanings.
++bool hd61830_device::snapshot_visible_text(char* dest, unsigned capacity)
++{
++	if (!dest || capacity < 321 || (m_mcr & MODE_DISPLAY_ON) == 0
++		|| (m_mcr & MODE_GRAPHIC) != 0 || m_vp <= 0 || m_hn < 40)
++		return false;
++
++	const int half_rows = m_nx / m_vp;
++	if (half_rows <= 0 || half_rows > 4)
++		return false;
++
++	for (unsigned i = 0; i != 320; ++i)
++		dest[i] = ' ';
++
++	const uint16_t start = m_dsa & 0x0fff;
++	const uint16_t lower = start + (half_rows * m_hn);
++	for (int row = 0; row < half_rows; ++row)
++	{
++		for (int x = 0; x < 40; ++x)
++		{
++			const uint8_t top = readbyte(start + row * m_hn + x);
++			const uint8_t bot = readbyte(lower + row * m_hn + x);
++			dest[row * 40 + x] = (top >= 0x20 && top <= 0x7e) ? char(top) : ' ';
++			dest[(row + half_rows) * 40 + x] =
++				(bot >= 0x20 && bot <= 0x7e) ? char(bot) : ' ';
++		}
++	}
++	dest[320] = '\0';
++	return true;
++}
+ uint16_t hd61830_device::draw_scanline(bitmap_ind16 &bitmap, const rectangle &cliprect, int y, uint16_t ra)
+ {
+ 	for (int sx = 0; sx < m_hn; sx+=2)
