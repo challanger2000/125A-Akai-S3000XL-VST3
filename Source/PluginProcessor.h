@@ -286,6 +286,9 @@ public:
     void runMameEngine();
     
     // Verifies the unzipped ROM files in the sd132 directory
+#ifdef AKAI_EMBED_PRIVATE_ROMS
+    bool prepareEmbeddedRoms();
+#endif
     bool verifyRomFiles();
     // Extracts only the required .bin files from a user-provided zip
     bool extractRomsFromZip(const juce::File& zipFile);

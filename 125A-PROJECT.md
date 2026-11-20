@@ -42,6 +42,17 @@ The **user-facing workflow should match the Emulator II/III**: directly choose/l
 - The upstream save-state code visibly serializes SD-1 `osram`/`seqram` shares; that is **not a proof** S3000XL sample RAM and programs are restored correctly. True sample/project recall is a priority.
 - MAME global process state may prevent safe simultaneous VST instances, as upstream port notes warn. Verify, do not assume.
 
+## P006 owner-only private ROM inclusion (source implementation)
+- `scripts/build/embed_private_roms.py` locally verifies the two previously
+  uploaded ROMs by exact SHA256 and generates a private, ignored C++ data object.
+- CMake flag `AKAI_PRIVATE_ROM_ARCHIVE` embeds both original binaries
+  directly into the private VST3. The plugin supplies them to MAME from an
+  automatically created per-instance temporary sandbox, deleted on shutdown.
+- The public CI job deliberately omits this flag and remains ROM-free.
+- **No complete private Windows VST3 build or original V2.0 ROM boot is claimed
+  until actual locally executed tests demonstrate both.** See
+  `docs/P006-PRIVATE-ROM-EMBED.md`.
+
 ## P005 full Windows build - source pipeline
 - The author-specific `F:\\MPC3000vsti` Projucer path and missing
   Ensoniq decors/MAME ZIP prevented a portable build.

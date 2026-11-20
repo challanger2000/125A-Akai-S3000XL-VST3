@@ -63,6 +63,22 @@ Open items and the measurements behind every decision are tracked in [`STATE.jso
 
 ---
 
+## Private owner-only ROM-inclusive Windows VST3
+
+The project has **two deliberately separate configurations**:
+
+- **Public GitHub Actions:** a ROM-free compilation/linking test to avoid
+  exposing either proprietary firmware image.
+- **Private Windows build:** compile both owner-supplied, SHA256-verified ROM
+  images directly into the VST3. The plugin automatically supplies the ROMs
+  to its internal MAME process on startup, with no user-facing ROM folder.
+  Temporary per-instance ROM copies are deleted on shutdown.
+
+For private compilation supply
+`-DAKAI_PRIVATE_ROM_ARCHIVE="C:/path/to/S3000XL-ROMs-V2.0-geprueft(1).zip"`
+to CMake. See [P006 private ROM process](docs/P006-PRIVATE-ROM-EMBED.md).
+Never upload the private build directory or generated C++ to public CI.
+
 ## ROMs
 
 You need to provide the firmware yourself and place it here:

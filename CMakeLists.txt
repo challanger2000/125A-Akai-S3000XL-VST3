@@ -47,6 +47,36 @@ juce_add_plugin(AkaiS3000XL
     VST3_CATEGORIES "Instrument" "Sampler"
 )
 juce_generate_juce_header(AkaiS3000XL)
+# OPTIONAL PRIVATE build ONLY: invoke locally with the user-supplied ZIP.
+# The script emits a ROM-containing .cpp under build/, never this repository.
+# The public GitHub Actions job intentionally omits this option.
+set(AKAI_PRIVATE_ROM_ARCHIVE "" CACHE FILEPATH "User's PRIVATE verified V2.0 ROM ZIP; never public CI")
+if(NOT "${AKAI_PRIVATE_ROM_ARCHIVE}" STREQUAL "")
+    if(NOT EXISTS "${AKAI_PRIVATE_ROM_ARCHIVE}")
+        message(FATAL_ERROR "Private ROM archive not found on this machine")
+    endif()
+    set(_akai_private_dir "${CMAKE_CURRENT_BINARY_DIR}/Generated/PrivateRoms")
+    execute_process(
+        COMMAND "${Python3_EXECUTABLE}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/scripts/build/embed_private_roms.py"
+                --rom-archive "${AKAI_PRIVATE_ROM_ARCHIVE}"
+                --out "${_akai_private_dir}"
+        RESULT_VARIABLE _private_rom_result
+        OUTPUT_VARIABLE _private_rom_message
+        ERROR_VARIABLE _private_rom_error
+    )
+    if(NOT _private_rom_result EQUAL 0)
+        message(FATAL_ERROR "PRIVATE firmware SHA256 validation failed: ${_private_rom_error}")
+    endif()
+    target_sources(AkaiS3000XL PRIVATE "${_akai_private_dir}/AkaiPrivateRomData.cpp")
+    target_include_directories(AkaiS3000XL PRIVATE "${_akai_private_dir}")
+    target_compile_definitions(AkaiS3000XL PRIVATE AKAI_EMBED_PRIVATE_ROMS=1)
+    message(STATUS "PRIVATE: ROM bytes embedded locally in this VST3 only. NEVER publish build.")
+else()
+    message(STATUS "PUBLIC CI: ROM-free diagnostic VST3 only.")
+endif()
+
+
 target_sources(AkaiS3000XL PRIVATE
     Source/PluginProcessor.cpp
     Source/PluginEditor.cpp

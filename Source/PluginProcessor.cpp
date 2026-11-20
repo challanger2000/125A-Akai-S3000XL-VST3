@@ -14,6 +14,9 @@
 #include "video/hd61830.h"
 #include "PluginEditor.h"
 #include "BinaryData.h" // MAME layout plugin packaged from official MAME source
+#ifdef AKAI_EMBED_PRIVATE_ROMS
+#include "AkaiPrivateRomData.h" // generated LOCAL-only, not stored in GitHub
+#endif
 
 #include <iostream>
 #include <chrono>
@@ -23,6 +26,7 @@
 #include <stdlib.h>
 #include <zlib.h> // MAME uses standard zlib
 #include <new>
+#include <cstring>
 #ifdef _WIN32
 #define NOMINMAX
 #include <windows.h>
@@ -3228,10 +3232,58 @@ bool EnsoniqSD1AudioProcessor::runSelfCheck()
 // ==============================================================================
 // Check ROMS
 // ==============================================================================
+#ifdef AKAI_EMBED_PRIVATE_ROMS
+bool EnsoniqSD1AudioProcessor::prepareEmbeddedRoms()
+{
+    // Firmware bytes are compiled into the private VST3 from the user's
+    // SHA256-verified ZIP.  MAME still uses its ORIGINAL ROM loader.
+    // Export only to this instance's private, transient sandbox and remove
+    // the entire sandbox in shutdownMame() after the emulation thread joins.
+    const auto romDir=juce::File(instanceTempDir).getChildFile("ROMs")
+        .getChildFile("s3000xl");
+    if (!romDir.isDirectory() && !romDir.createDirectory().wasOk())
+        return false;
+
+    const auto install=[&](const char* name,const unsigned char* bytes,
+                           std::size_t length) {
+        const auto file=romDir.getChildFile(name);
+        juce::MemoryBlock existing;
+        if(file.existsAsFile() && file.loadFileAsData(existing)
+            && existing.getSize()==length
+            && std::memcmp(existing.getData(),bytes,length)==0)
+            return true;
+        if(!file.replaceWithData(bytes,length))
+            return false;
+        existing.reset();
+        return file.loadFileAsData(existing) && existing.getSize()==length
+            && std::memcmp(existing.getData(),bytes,length)==0;
+    };
+    return install("s3000xl_v2_0.bin",akai::private_rom::firmware,
+                   akai::private_rom::firmware_size)
+        && install("hd61830.bin",akai::private_rom::display,
+                   akai::private_rom::display_size);
+}
+#endif
+
+
 
 void EnsoniqSD1AudioProcessor::checkRomAndBootMame()
 {
-    // --- 0. LEGACY FALLBACK (For existing users) ---
+#ifdef AKAI_EMBED_PRIVATE_ROMS
+    // Private build: MAME ROMs come solely from this plugin binary.
+    // No Documents ROM folder, third-party install or user file selection.
+    if (!prepareEmbeddedRoms()) {
+        isRomMissing.store(true,std::memory_order_release);
+        isRomInvalid.store(true,std::memory_order_release);
+        isMameRunning.store(false,std::memory_order_release);
+        missingFilesList.clear();
+        missingFilesList.add("Private ROM extraction or verification failed.");
+        return;
+    }
+#else
+    // --- 0. LEGACY FALLBACK (for ROM-free public diagnostic build) ---
+    // Keep the original manual ROM selection behavior, but it is NOT the
+    // final private deployment model.
     // Check if the old 'sd132.zip' exists in the base folder and migrate it
         juce::File baseDir = juce::File::getSpecialLocation(juce::File::userDocumentsDirectory).getChildFile("S3000XL");
         juce::File legacyZip = baseDir.getChildFile("sd132.zip");
@@ -3253,8 +3305,9 @@ void EnsoniqSD1AudioProcessor::checkRomAndBootMame()
             // Auto-copy any loose .bin files placed directly in the ROMs folder
             copyRomsFromFolder(romsDir);
         }
+#endif
 
-    // 2. Verify the unzipped files in ROMs/sd132
+    // 2. Verify the two expected s3000xl files (from temp in PRIVATE)
     if (!verifyRomFiles()) {
         isRomMissing.store(true, std::memory_order_release);
         isRomInvalid.store(true, std::memory_order_release);
@@ -3278,9 +3331,13 @@ void EnsoniqSD1AudioProcessor::checkRomAndBootMame()
 bool EnsoniqSD1AudioProcessor::verifyRomFiles()
 {
     missingFilesList.clear();
+#ifdef AKAI_EMBED_PRIVATE_ROMS
+    juce::File sd132Dir = juce::File(instanceTempDir).getChildFile("ROMs").getChildFile("s3000xl");
+#else
     juce::File sd132Dir = juce::File::getSpecialLocation(juce::File::userDocumentsDirectory)
                              .getChildFile("S3000XL").getChildFile("ROMs").getChildFile("s3000xl");
-    
+#endif
+
     juce::StringArray expectedFiles = {
         "s3000xl_v2_0.bin", "hd61830.bin"
     };
@@ -3485,8 +3542,13 @@ void EnsoniqSD1AudioProcessor::runMameEngine()
     args.push_back("s3000xl");
     
     // --- 2. ROM PATH CONFIGURATION ---
+#ifdef AKAI_EMBED_PRIVATE_ROMS
+    // Only our short-lived per-instance extraction folder is visible to MAME.
+    juce::File romsDir=juce::File(instanceTempDir).getChildFile("ROMs");
+#else
     juce::File romsDir = juce::File::getSpecialLocation(juce::File::userDocumentsDirectory)
                                      .getChildFile("S3000XL").getChildFile("ROMs");
+#endif
     romsDir.createDirectory();
 
         #ifdef _WIN32
