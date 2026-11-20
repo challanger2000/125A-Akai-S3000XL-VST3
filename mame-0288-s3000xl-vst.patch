@@ -1,514 +1,3 @@
-diff --git a/src/devices/machine/am9517a.cpp b/src/devices/machine/am9517a.cpp
-index fb491bdc..2b75e22d 100644
---- a/src/devices/machine/am9517a.cpp
-+++ b/src/devices/machine/am9517a.cpp
-@@ -52,11 +52,23 @@
-  */
- 
- #include "emu.h"
-+#include "cpu/nec/nec.h"
-+#include <map>
-+#include <vector>
-+#include <algorithm>
- #include "am9517a.h"
- 
- //#define VERBOSE 1
- #include "logmacro.h"
- 
-+// [MULTIOUT 7] EVERY DIAGNOSTIC IN THIS FILE IS OFF. Thor: no probe may remain. The tags below are
-+// ours - the upstream file's own logerror calls are untouched - and they are compiled out rather than
-+// merely quietened, because this project has four separate occasions on which an instrument was heard
-+// by ear. Set to 1 to bring the whole set back.
-+#define S3000_TRACE 0
-+#define S3000_LOG(...) do { if (S3000_TRACE) logerror(__VA_ARGS__); } while (0)
-+
-+
- 
- 
- //**************************************************************************
-@@ -1042,6 +1054,35 @@ void upd71071_device::device_reset()
- }
- 
- 
-+// [S3000XL SAMPLING 59] TEMPORARY DIAGNOSTIC - REMOVE WHEN THE QUESTION IS ANSWERED.
-+//
-+// The S3000XL's A/D fills a 4096-word autoinit ring and its terminal count reaches nothing on that
-+// board - no TC or EOP pin exists on the PAL that makes the request. So the firmware must track the
-+// ring some other way, and the only candidates are here: the current address at 0x04-0x06, the count
-+// at 0x02-0x03, or the status byte at 0x0b whose TC bits a read clears. Which of them it polls, and
-+// how often, cannot be read out of the ROM because the OS runs from RAM.
-+//
-+// A per-register histogram once a second answers it without a budget to spend on the wrong thing: a
-+// register polled thousands of times during a recording and never otherwise is the one being used.
-+// [S3000XL SAMPLING 75] OFF. Every question this block was built for has been answered, and leaving it
-+// on cost a whole round: the firmware rewrites the channel register on every poll, so DMA-WRITE was
-+// logging 156453 lines a SECOND, and with state_int() and machine().time() on each register read as
-+// well the emulation fell far below real time. The host ring went from about 5000 frames of backlog to
-+// 246786 of 262144 - nearly six seconds - and I read the waveform taking ten to thirty seconds to draw
-+// as a defect in the machine. It was my instrument. Thor caught it by remembering the drawing was fine
-+// a few commits earlier.
-+//
-+// AN INSTRUMENT THAT SLOWS THE MACHINE IS AN INSTRUMENT THAT ALTERS IT. Already written down after
-+// SAMPLING 47's whole-space write tap, and broken again here in a subtler way - not a tap on a hot
-+// path but a log line on one.
-+//
-+// What it established, all of it kept in the commit record: the firmware polls the DMA's CURRENT
-+// ADDRESS and nothing else, 223870 times a second; its routine at 0271B0 subtracts the base 91B0h and
-+// its own pointer, takes it modulo an 8192-byte ring and asks for 800h; it arms the transfer itself at
-+// GO with base 0091B0h, count 4096 words, word mode with autoinitialise; and its pointer runs 2816 to
-+// 3968 words behind through a recording.
-+#define V5X_DMA_READ_TRACE 0   // [SAMPLING 94] off - the segment probe answered its question
-+
- uint8_t upd71071_device::read(offs_t offset)
- {
- 	uint8_t ret = 0;
-@@ -1049,6 +1090,220 @@ uint8_t upd71071_device::read(offs_t offset)
- 
- 	LOG("DMA: read from register %02x\n",offset);
- 
-+#if V5X_DMA_READ_TRACE == 2
-+	// [S3000XL SAMPLING 77] ONE LINE, ONCE. The caller's "add bp,[7904]" is 03 2E 04 79 - a DS-relative
-+	// word operand, not an absolute address - so SAMPLING 76 read physical 7904h and got an unrelated
-+	// constant that never moved. The rate position lives at DS*16 + 7904h and DS has to come from the
-+	// processor at the moment that routine runs. This fires on the FIRST channel-2 address read after a
-+	// recording begins and never again, so it cannot cost anything.
-+	if ((channel & 3) == 2 && offset == 0x05)
-+	{
-+		// [S3000XL SAMPLING 78] ONLY FROM THE RECORDING'S OWN CALL SITE. SAMPLING 77 latched on the
-+		// first channel-2 address read of the session and that is the LEVEL METER: it reported
-+		// pc=01431Fh and bx=0726h, which is exactly the idle BX seen in every earlier trace, with DS=0
-+		// and an empty position. The routine that matters lives at 0271B0h and only its polls count.
-+		static bool once = false;
-+		if (!once)
-+		{
-+			if (cpu_device *const cpu = dynamic_cast<cpu_device *>(owner()))
-+			{
-+				// NOT an early return - this block sits before the switch, so returning here would hand
-+				// back zero instead of the register and the probe would be altering the machine, which
-+				// is the one thing an instrument must never do.
-+				const uint32_t pc = uint32_t(cpu->pc());
-+				if (pc >= 0x027180 && pc <= 0x0271D0)
-+				{
-+				once = true;
-+				const uint32_t ds = uint32_t(cpu->state_int(NEC_DS0)) & 0xffff;
-+				const uint32_t lin = (ds << 4) + 0x7904;
-+				address_space &sp = cpu->space(AS_PROGRAM);
-+				S3000_LOG("RATE-SEG DS=%04X  position lives at %06X  =%04X%04X  bx=%04X pc=%06X t=%.5f\n",
-+					ds, lin, sp.read_word(lin + 2), sp.read_word(lin),
-+					uint32_t(cpu->state_int(NEC_BW)) & 0xffff, uint32_t(cpu->pc()),
-+					machine().time().as_double());
-+				}
-+			}
-+		}
-+	}
-+#endif
-+
-+#if V5X_DMA_READ_TRACE == 1
-+	{
-+		static uint32_t hist[16] = { 0 };
-+		static uint32_t chan_hist[4] = { 0 };
-+		static std::map<uint32_t, uint32_t> pc_hist;
-+		static uint32_t sample = 0;
-+		static attotime next = attotime::zero;
-+		static bool dumped = false;
-+		static uint32_t s_avail_hist[8] = { 0 };
-+		static uint32_t s_trace = 40;
-+		static attotime s_last_poll_t = attotime::zero;
-+		static uint32_t s_avail_n = 0;
-+		hist[offset & 0x0f]++;
-+		chan_hist[channel & 3]++;
-+
-+		// [S3000XL SAMPLING 63] WHERE IS THE POLLING LOOP. SAMPLING 59 established WHAT the firmware
-+		// reads - the channel-2 current address, 223870 times a second, one look every 4.5 us - and
-+		// SAMPLING 55 and 62 established what it then does with it: it copies out about 4381 samples
-+		// when only about 267 are new, jumping back one buffer length at every seam. The arithmetic
-+		// between the pointer it reads and the copy it makes is therefore wrong, and that arithmetic is
-+		// in RAM. The OS copies itself there at boot, so it cannot be disassembled from the ROM image -
-+		// same rule as the DSP's P-RAM on the Virus, and the same instrument that solved it: a FREQUENCY
-+		// histogram of the program counter, not a sample of consecutive values.
-+		//
-+		// One pc in sixteen is enough for frequency and keeps a 224 kHz path cheap. The dump that
-+		// follows is the point of the exercise: 128 bytes of live program memory around the hottest
-+		// address, once, so the loop can be decoded from what is actually executing.
-+		if ((channel & 3) == 2 && (offset == 0x04 || offset == 0x05) && ((++sample & 0x0f) == 0))
-+		{
-+			if (cpu_device *const cpu = dynamic_cast<cpu_device *>(owner()))
-+				pc_hist[uint32_t(cpu->pc())]++;
-+		}
-+
-+		// [S3000XL SAMPLING 64] IS THE DMA LAPPING THE FIRMWARE? The routine is now known, decoded from
-+		// the live dump at 0x0271B0:
-+		//
-+		//   out C001h,2        select channel 2
-+		//   in  ax,C004h       the current address, 16 bits
-+		//   sub ax,91B0h       -> byte offset into the buffer
-+		//   sub ax,bx          -> minus the firmware's own read pointer
-+		//   modulo 2000h       the ring is 8192 bytes, which is 4096 words
-+		//   jz  re-read        nothing new
-+		//   sub ax,800h        is a full 2048-byte block ready? answer in CF
-+		//
-+		// So the firmware services the ring in 1024-word blocks, four to a lap, and its own pointer is
-+		// in BX. Everything it does is byte-based, which settles the increment question from the
-+		// firmware's own arithmetic rather than from a datasheet page.
-+		//
-+		// What cannot be seen from the DMA side alone is whether it KEEPS UP. If the emulated V53 is
-+		// too slow to copy a block before the transfer laps the ring, the difference this routine
-+		// computes wraps and it re-reads stale data - which is exactly the measured symptom: a jump back
-+		// of one ring length at every seam and 4381 samples copied out where only 267 were new.
-+		//
-+		// BX is readable here, so the same subtraction can be done on this side. The maximum of it over
-+		// each second is the answer with no threshold in it: comfortably under 2000h means the firmware
-+		// keeps up and the fault is elsewhere; reaching 2000h means the transfer laps it.
-+		if ((channel & 3) == 2 && offset == 0x05)
-+		{
-+			if (cpu_device *const cpu = dynamic_cast<cpu_device *>(owner()))
-+			{
-+				const uint32_t bx = uint32_t(cpu->state_int(NEC_BW)) & 0xffff;
-+				const uint32_t avail = ((m_channel[2].m_address - 0x91B0 - bx) & 0x1fff);
-+				const attotime now_t = machine().time();
-+				// [S3000XL SAMPLING 65] A HISTOGRAM, NOT A MAXIMUM. SAMPLING 64 reported max 8190 bytes
-+				// of 8192 and that single number cannot be read: 8190 is MINUS TWO on this ring, which
-+				// is the firmware's pointer sitting one word AHEAD of the address - and that happens
-+				// benignly in the gap between its own read and its pointer update, a race in MY probe
-+				// rather than in the machine. One extreme sample proves nothing either way.
-+				//
-+				// Eight buckets of 1024 bytes show the whole distribution and need no threshold. The
-+				// firmware processes when 800h is available, so a healthy run lives in buckets 0 and 1
-+				// with the occasional 2. Weight in buckets 4 to 6 is the transfer genuinely lapping it.
-+				// Bucket 7 is where the minus-two artefact lands, so it can be recognised and ignored
-+				// instead of being mistaken for the answer.
-+				s_avail_hist[(avail >> 10) & 7]++;
-+				s_avail_n++;
-+
-+				// [S3000XL SAMPLING 66] THE RAW SEQUENCE, because the histogram found the shape and only
-+				// the sequence can say where it starts. 96 per cent of polls during a recording put BX
-+				// AHEAD of the DMA address by 1 to 1024 bytes, and the firmware's own code shows what
-+				// that does: sub ax,bx goes negative, the modulo turns it into nearly a full ring, the
-+				// comparison against 800h says a block is ready, and it copies stale data and advances
-+				// BX another 800h. One word of slip latches permanently - it can never recover.
-+				//
-+				// So the question is no longer whether it slips but WHEN and FROM WHAT. This prints the
-+				// first 40 polls after a recording begins: the DMA offset, the firmware's pointer, and
-+				// the difference it will act on. If BX starts at zero while the offset is already deep
-+				// into the ring, the cause is that OUR A/D DMA runs continuously for the level meter and
-+				// the ring is entered at an arbitrary phase. If they start together and drift apart, it
-+				// is something else, and the trace will show which poll it happens on.
-+				// [S3000XL SAMPLING 67] SPREAD THE TRACE OVER TIME. SAMPLING 66's forty lines all fell
-+				// inside 0.21 ms, which is too short for BX to move even if it were moving: it showed
-+				// bx stuck at 0384h while the DMA offset crept 0286h to 029Ch, avail pinned near 1F00h,
-+				// and the routine answering "a block is ready" on every one of them. Whether that is a
-+				// pointer that never advances or a pointer sampled too briefly cannot be told from a
-+				// fifth of a millisecond. One line every 4096 polls covers about two seconds instead.
-+				// [S3000XL SAMPLING 71] CATCH THE FIRST POLLS OF A RECORDING, which every trace so far has
-+				// missed - 66 began 4000 polls in, 67 one line every 4096. Both showed the steady state
-+				// and neither could show the START.
-+				//
-+				// And the steady state is now understood well enough to make the start the only question
-+				// left. With the FIFO refilled at 11025 Hz instead of 4 kHz - blocks of four frames, gaps
-+				// of 68 us instead of 193 - the lead did not shrink: 98 per cent of polls still put BX
-+				// ahead, and the amount settled at a STEADY 0CAh to 12Eh bytes, about 128 words or 2.9 ms.
-+				// No 68 us stall can produce a 2.9 ms lead, so the burst window is NOT what puts the
-+				// firmware in front, and that hypothesis is finished.
-+				//
-+				// A constant lead with both pointers advancing at the same rate explains everything that
-+				// was measured in the audio: the pitch is right because the rates match, and the seam is
-+				// simply where the read head crosses the write head, one ring length of content apart.
-+				// So the firmware does not drift ahead - it STARTS ahead and stays there.
-+				//
-+				// The polling loop is idle at about 200 polls a second and busy at 145000, so a gap of
-+				// more than 10 ms between polls marks the moment a recording begins. Forty lines from
-+				// there show what BX is initialised to against where the transfer had got to.
-+				const attotime gap = now_t - s_last_poll_t;
-+				s_last_poll_t = now_t;
-+				if (gap > attotime::from_msec(10))
-+					s_trace = 0;
-+				if (s_trace < 40)
-+				{
-+					s_trace++;
-+					S3000_LOG("DMA-TRACE poll %u  dma_off %04X  bx %04X  avail %04X (%s)  t=%.5f\n",
-+						s_avail_n, (m_channel[2].m_address - 0x91B0) & 0x1fff, bx, avail,
-+						(avail >= 0x800) ? "acts" : "waits", machine().time().as_double());
-+				}
-+			}
-+		}
-+
-+		const attotime now = machine().time();
-+		if (now >= next)
-+		{
-+			next = now + attotime::from_seconds(1);
-+			S3000_LOG("DMA-READS  count %u/%u  addr %u/%u/%u  mode %u  cmd %u/%u  STATUS %u  temp %u/%u  req %u  mask %u  chan0..3 %u/%u/%u/%u  t=%.3f\n",
-+				hist[0x02], hist[0x03], hist[0x04], hist[0x05], hist[0x06], hist[0x0a],
-+				hist[0x08], hist[0x09], hist[0x0b], hist[0x0c], hist[0x0d], hist[0x0e], hist[0x0f],
-+				chan_hist[0], chan_hist[1], chan_hist[2], chan_hist[3], now.as_double());
-+
-+			S3000_LOG("DMA-AVAIL polls %u  buckets of 1024 bytes: 0-1k:%u 1-2k:%u 2-3k:%u 3-4k:%u 4-5k:%u 5-6k:%u 6-7k:%u 7-8k:%u  t=%.3f\n",
-+				s_avail_n, s_avail_hist[0], s_avail_hist[1], s_avail_hist[2], s_avail_hist[3],
-+				s_avail_hist[4], s_avail_hist[5], s_avail_hist[6], s_avail_hist[7], now.as_double());
-+			for (int i = 0; i < 8; i++) s_avail_hist[i] = 0;
-+			s_avail_n = 0;
-+
-+			if (!pc_hist.empty())
-+			{
-+				std::vector<std::pair<uint32_t, uint32_t> > v(pc_hist.begin(), pc_hist.end());
-+				std::sort(v.begin(), v.end(),
-+					[] (auto const &a, auto const &b) { return a.second > b.second; });
-+				std::string line = "DMA-POLL-PC ";
-+				for (unsigned i = 0; i < 8 && i < v.size(); i++)
-+					line += util::string_format("%06X:%u  ", v[i].first, v[i].second);
-+				logerror("%s(%u distinct)  t=%.3f\n", line, unsigned(v.size()), now.as_double());
-+
-+				// Once the loop is clearly identified - a thousand hits on one address - dump the live
-+				// code around it. Statically this region is empty; the OS put it there at boot.
-+				if (!dumped && v[0].second > 1000)
-+				{
-+					dumped = true;
-+					if (cpu_device *const cpu = dynamic_cast<cpu_device *>(owner()))
-+					{
-+						address_space &sp = cpu->space(AS_PROGRAM);
-+						const uint32_t base = (v[0].first > 64) ? (v[0].first - 64) : 0;
-+						for (int row = 0; row < 8; row++)
-+						{
-+							std::string bytes;
-+							for (int i = 0; i < 16; i++)
-+								bytes += util::string_format("%02X ", sp.read_byte(base + row * 16 + i));
-+							S3000_LOG("DMA-POLL-CODE %06X: %s\n", base + row * 16, bytes);
-+						}
-+					}
-+				}
-+			}
-+		}
-+	}
-+#endif
-+
- 	switch (offset)
- 	{
- 		case 0x01:  // Channel
-@@ -1123,6 +1378,225 @@ void upd71071_device::write(offs_t offset, uint8_t data)
- {
- 	int channel = m_selected_channel;
- 
-+	// [S3000XL SAMPLING 94] WHAT DOES THE FIRMWARE PROGRAM ON CHANNEL 3, and does the transfer have an
-+	// end at all?
-+	//
-+	// DMA-DST settled the aim: 44100 words a second, 100 per cent contiguous, zero jumps, span 88198
-+	// bytes - exactly 44099 words of two. The firmware's targeting is perfect. But the addresses march
-+	// on second after second - 032710, 047F96, 0563EA, 020000, 035888, 04B7F8, 061080, 076908, 08C190,
-+	// 0A1A18, 0B72A0 - roughly 600 KB in ten seconds for a ONE SECOND recording. The transfer never
-+	// ends, and what it walks over is every sample already in memory. That is the corruption, and it
-+	// explains the built-in waveforms turning to sawtooth: they sit at fixed addresses and get paved.
-+	//
-+	// On the real part the sound chip may assert DREQ for ever and it costs nothing, because the DMA
-+	// controller's COUNT ends the transfer - end_of_process() masks the channel when autoinitialise is
-+	// off. If this firmware programs channel 3 with autoinit, or with a count we mishandle, it reloads
-+	// and runs on.
-+	//
-+	// These registers are written a handful of times per recording, so logging them costs nothing -
-+	// unlike SAMPLING 84's trace, where the channel register alone produced 156453 lines a second.
-+	// [S3000XL SAMPLING 95] DOES THE LOOP CONVERGE? Only the ARM matters, so only reg 0Ah is reported -
-+	// a handful of lines per recording instead of the 803 that the full register dump produced.
-+	//
-+	// What the last run established: mode 49h has bit 4 clear, so there is NO autoinitialise and the
-+	// controller does terminate - count reaching FFFFFFFFh is just the post-decrement remainder after
-+	// end_of_process() has already masked the channel. The DMA is behaving. The marching comes from the
-+	// FIRMWARE re-arming it, block after block: source 0091B0h, count 07FFh - 2048 words, 800h bytes,
-+	// exactly the block size in its own routine - and it does that far more often than the twenty-one
-+	// arms a one-second recording needs.
-+	//
-+	// That is the loop at 0271A3h, which exits only when avail falls below 800h. avail is the A/D ring
-+	// pointer minus BX, and BX is not updated inside the loop, so on this model it can only grow. The
-+	// firmware is scripture and on real hardware it does exit, so something that would move on the
-+	// board does not move here.
-+	//
-+	// Printing BX and the channel-2 pointer at each arm shows it directly: if avail falls arm by arm
-+	// the loop is converging and the trouble is elsewhere; if it is flat or rising, this is the runaway
-+	// and the question becomes what should have moved.
-+	// [S3000XL SAMPLING 116] EVERY CHANNEL'S ARM, NOT JUST CHANNEL 3.
-+	//
-+	// A gap in the instrumentation, found by noticing what the evidence could not have shown: the A/D
-+	// is on CHANNEL 2 and there has never been an arm probe on it. Every "the firmware arms it once"
-+	// statement in this project's record is therefore about channel 3 only.
-+	//
-+	// The question it answers is the prosaic one, and it has to be asked before anything is built: does
-+	// the firmware arm channel 2 TWICE during a stereo recording - once for the low half of the A/D ring
-+	// at 0091B0 and once for the high half at 00A1B0? Those are exactly the two sources it copies from
-+	// when the recording ends. If it does, the right channel needs no address trickery at all: it needs
-+	// handing over when the machine asks for the second half, and nothing else.
-+	//
-+	// A handful of lines per recording, no behaviour touched.
-+	if ((offset & 0x0f) == 0x0a)
-+	{
-+		// [S3000XL SAMPLING 136] WHICH ROUTINE ARMS IT - the pc, because the contradiction is now in
-+		// the open and only the caller can resolve it.
-+		//
-+		// Measured over a 5-second stereo recording: the -R sample region receives EXACTLY 2048 words,
-+		// the same as it does for a one-second one, and the arm that delivers them is mode 49 - no
-+		// autoinitialise, a single shot. So it is not a partial fill that gets truncated; it is one
-+		// operation that happens once.
-+		//
-+		// And it does not stop for lack of data. The arm line's own avail reads 1D4F, which is 7503
-+		// bytes against a threshold of 0x800, and prints "-> copies". The firmware believes there is
-+		// plenty left. Something simply does not call the copy again.
-+		//
-+		// The routine that arms it is the only thing that can say why, and it cannot be read from the
-+		// ROM: this OS copies itself into RAM and runs from there, the same trap as the DSP's P-RAM and
-+		// the 8051's work RAM. Only running code can be measured.
-+		uint32_t armpc = 0;
-+		if (cpu_device *const c = dynamic_cast<cpu_device *>(owner()))
-+			armpc = uint32_t(c->pc());
-+		S3000_LOG("DMA%d-ARMED  mode %02X  addr %06X  count %04X  pc=%06X  t=%.5f\n",
-+			channel, data, m_channel[channel].m_address, m_channel[channel].m_base_count,
-+			armpc, machine().time().as_double());
-+
-+		// [S3000XL SAMPLING 137] WHO CALLS THE ARM HELPER - the raw stack, reconstructed offline.
-+		//
-+		// The pc settled one thing and opened another. Both closing one-shots, 0091B0 and 00A1B0, are
-+		// armed from pc=02621D - and so are the boot-time sample loads at t=7.01. So 02621D is a
-+		// GENERIC DMA-arm helper, not the recording's own loop, and it tells us nothing about why the
-+		// -R block is issued once. The caller does.
-+		//
-+		// The return address is on the stack, but NOT at an assumed depth: the Virus work spent a round
-+		// computing a caller from one guessed frame depth and got an impossible address back, because
-+		// the routine was reached from several depths. So eight words are dumped raw and the caller is
-+		// picked out afterwards, against the addresses we already know - 0271A3 and 0270C6 for the copy
-+		// loop, 027A99 for the recording arm.
-+		if (channel == 3 && m_channel[3].m_address == 0x00a1b0)
-+		{
-+			if (cpu_device *const c = dynamic_cast<cpu_device *>(owner()))
-+			{
-+				const uint32_t sp = uint32_t(c->state_int(NEC_SP)) & 0xffff;
-+				const uint32_t ss = uint32_t(c->state_int(NEC_SS)) & 0xffff;
-+				std::string words;
-+				address_space &sp_space = c->space(AS_PROGRAM);
-+				for (int i = 0; i < 24; i++)
-+					words += util::string_format("%04X ", sp_space.read_word(((ss << 4) + sp + i * 2) & 0xfffff));
-+				// [S3000XL SAMPLING 138] THE SEGMENT, AND THE CODE AT EVERY CANDIDATE.
-+				//
-+				// The dump came back  0048 A1B0 0001 02EE B1BC 0000 0800 5C90  and the parameters are
-+				// visible in it - A1B0 is the source, B1BC the end of the ring, 0800 a length - so the
-+				// return address is in there too. Which word it is cannot be picked by eye, and picking
-+				// by eye is exactly what cost a round in the Virus work.
-+				//
-+				// So the code segment is printed and 16 bytes are dumped at (PS<<4 + word) for every
-+				// one of the eight. Whichever of them disassembles into something that calls the arm
-+				// helper at 02621D is the caller, and the rest will be data or nonsense - which is
-+				// itself the check that this is being read correctly rather than assumed.
-+				const uint32_t ps = uint32_t(c->state_int(NEC_PS)) & 0xffff;
-+				S3000_LOG("ARM-STACK  ss=%04X sp=%04X ps=%04X  ->  %s  t=%.5f\n",
-+					ss, sp, ps, words, machine().time().as_double());
-+				// [S3000XL SAMPLING 140] DEEPER. The E8/9A filter rejected all eight of SAMPLING 139's
-+				// candidates - no CALL in front of any of them - which is a clean negative and proof the
-+				// filter can reject. So the return address is not in the top eight words: the helper
-+				// saved more than that on entry, or it was not reached by a CALL at all. Twenty-four
-+				// words, same mechanical test, and only the ones that pass are worth reading.
-+				for (int i = 0; i < 24; i++)
-+				{
-+					const uint32_t w = sp_space.read_word(((ss << 4) + sp + i * 2) & 0xfffff);
-+					const uint32_t cand = ((ps << 4) + w) & 0xfffff;
-+					// [S3000XL SAMPLING 139] THE SELF-CHECK: what comes BEFORE the candidate.
-+					//
-+					// SAMPLING 138's dump was read by eye and the first word looked convincing - the
-+					// code at it writes I/O ports E0, E2 and E4, which are unmapped in this driver and
-+					// therefore interesting. The log then refuted it: every write to those ports happens
-+					// at t=0.05 and t=3.51, and none during the stereo recording at t=68 when the stack
-+					// was sampled. That code is not running at that moment, so it is not the return
-+					// address, and a fix was very nearly built on a candidate chosen by how it looked.
-+					//
-+					// A return address has a CALL immediately in front of it. Near call is E8 with a
-+					// two-byte displacement, far call is 9A with four, so byte[-3] == E8 or byte[-5] ==
-+					// 9A settles each candidate mechanically. The ones that fail are data, and saying so
-+					// is the point - a filter that cannot reject is not a filter.
-+					std::string bytes, before;
-+					for (int b = -5; b < 0; b++)
-+						before += util::string_format("%02X ", sp_space.read_byte((cand + b) & 0xfffff));
-+					for (int b = 0; b < 16; b++)
-+						bytes += util::string_format("%02X ", sp_space.read_byte((cand + b) & 0xfffff));
-+					const uint8_t m3 = sp_space.read_byte((cand - 3) & 0xfffff);
-+					const uint8_t m5 = sp_space.read_byte((cand - 5) & 0xfffff);
-+					// [S3000XL SAMPLING 141] THE CALLER IS FOUND, SO DUMP IT.
-+					//
-+					// Two candidates passed the E8/9A test and together they give the chain. w8 returns
-+					// to 260FE, preceded by E8 79 00 - a near call at 260FB whose target is 260FE+0x79 =
-+					// 26177. The arming pc, 2621D, is 0xA6 into that, so 26177 IS the DMA-arm routine.
-+					// w10 returns to 2616E, preceded by E8 70 FF - a call at 2616B with displacement
-+					// -0x90, target 260DE. So:
-+					//
-+					//     260DE  --(call at 260FB)-->  26177  -->  OUT to the DMA   (pc 2621D)
-+					//
-+					// 260DE is the routine that decides how many blocks are copied, and that is the
-+					// question: the -R sample receives exactly one 2048-word block whatever the length
-+					// of the recording, while the firmware's own avail says there is plenty left.
-+					//
-+					// It cannot be read from the ROM - this OS runs from RAM - so it is dumped from live
-+					// memory, once, when the 00A1B0 arm happens.
-+					if (i == 0)
-+					{
-+						static bool dumped = false;
-+						if (!dumped)
-+						{
-+							dumped = true;
-+							for (int row = 0; row < 12; row++)
-+							{
-+								std::string bs;
-+								for (int b = 0; b < 16; b++)
-+									bs += util::string_format("%02X ", sp_space.read_byte((0x260de + row * 16 + b) & 0xfffff));
-+								S3000_LOG("CALLER-CODE %05X: %s\n", 0x260de + row * 16, bs);
-+							}
-+							for (int row = 0; row < 8; row++)
-+							{
-+								std::string bs;
-+								for (int b = 0; b < 16; b++)
-+									bs += util::string_format("%02X ", sp_space.read_byte((0x26177 + row * 16 + b) & 0xfffff));
-+								S3000_LOG("ARMFN-CODE  %05X: %s\n", 0x26177 + row * 16, bs);
-+							}
-+						}
-+					}
-+
-+					if (m3 == 0xe8 || m5 == 0x9a)
-+						S3000_LOG("ARM-CAND  w%d=%04X -> %05X:  before[ %s]  %s  %s\n",
-+							i, w, cand, before, bytes,
-+							(m3 == 0xe8) ? "<<< NEAR CALL" : "<<< FAR CALL");
-+				}
-+			}
-+		}
-+	}
-+
-+	if (channel == 3 && (offset & 0x0f) == 0x0a)
-+	{
-+		uint32_t bx = 0;
-+		if (cpu_device *const cpu = dynamic_cast<cpu_device *>(owner()))
-+			bx = uint32_t(cpu->state_int(NEC_BW)) & 0xffff;
-+		const uint32_t adoff = (m_channel[2].m_address - 0x91B0) & 0x1fff;
-+		S3000_LOG("DMA3-ARM mode %02X  src %06X  count %04X  |  bx %04X  ad_off %04X  avail %04X %s  t=%.5f\n",
-+			data, m_channel[3].m_address, m_channel[3].m_base_count, bx, adoff,
-+			(adoff - bx) & 0x1fff, (((adoff - bx) & 0x1fff) >= 0x800) ? "-> copies" : "-> stops",
-+			machine().time().as_double());
-+	}
-+
-+#if V5X_DMA_READ_TRACE == 1
-+	// [S3000XL SAMPLING 72] DOES THE FIRMWARE RE-ARM THE ADDRESS AT GO?
-+	//
-+	// SAMPLING 71 corrected a sign I had read backwards for two updates. avail is by construction HOW
-+	// MUCH NEW DATA IS WAITING, so it says how far the firmware is BEHIND, not ahead. 1F00h is 3968
-+	// words of a 4096-word ring: it is not in front of the transfer, it is one hair from being lapped
-+	// by it, and the traced windows show it sitting between 2800 and 3968 words behind, constantly.
-+	//
-+	// So it keeps PACE but has no margin, and a routine that can only keep pace can never catch up.
-+	// The deficit therefore has to be created at the start - and in this model the A/D DMA runs
-+	// continuously to feed the level meter, so a recording enters the ring at whatever phase the
-+	// transfer happens to be at.
-+	//
-+	// One question decides it: does the firmware write the base address when the recording starts? If
-+	// it does, m_address is reset to 91B0h and the phase is zero, and the deficit comes from somewhere
-+	// else. If it never writes it, the ring is entered wherever the pointer was, and the deficit is
-+	// ours to fix. Registers 04h-06h are the address, 02h-03h the count, 0Ah the mode, 01h the channel.
-+	if ((offset & 0x0f) <= 0x0a)
-+		S3000_LOG("DMA-WRITE ch%d reg %02X = %02X  (addr now %06X)  t=%.5f\n",
-+			channel, offset & 0x0f, data, m_channel[channel].m_address, machine().time().as_double());
-+#endif
-+
- 	switch (offset & 0xf)
- 	{
- 		case 0x00:  // Initialise
 diff --git a/src/devices/sound/l7a1045_l6028_dsp_a.cpp b/src/devices/sound/l7a1045_l6028_dsp_a.cpp
 index bd1fe109..54baefdf 100644
 --- a/src/devices/sound/l7a1045_l6028_dsp_a.cpp
@@ -1844,7 +1333,7 @@ index 44db8253..390b9bc3 100644
  	uint8_t dma_memr_cb(offs_t offset);
  	void dma_memw_cb(offs_t offset, uint8_t data);
  	uint16_t dma_mem16r_cb(offs_t offset);
-@@ -240,11 +721,511 @@ private:
+@@ -240,12 +721,512 @@ private:
  
  void s3000_state::machine_start()
  {
@@ -2353,10 +1842,11 @@ index 44db8253..390b9bc3 100644
 +	m_rateprobe = timer_alloc(FUNC(s3000_state::rateprobe_tick), this);
 +	m_rateprobe->adjust(attotime::from_hz(1000), 0, attotime::from_hz(1000));
 +
+ 	m_floppy_led.resolve();
  	m_floppy->get_device()->setup_led_cb(floppy_image_device::led_cb(&s3000_state::floppy_led_cb, this));
  }
  void s3000_state::machine_reset()
-@@ -347,6 +1328,13 @@ void s3000_banked_state::cd3000i_io_map(address_map &map)
+@@ -347,6 +1329,13 @@ void s3000_banked_state::cd3000i_io_map(address_map &map)
  
  void s3000_state::s3000xl_io_map(address_map &map)
  {
@@ -2370,7 +1860,7 @@ index 44db8253..390b9bc3 100644
  	map(0x0000, 0x001f).m("spc", FUNC(mb89352_device::map)).umask16(0x00ff);
  	map(0x0020, 0x0023).m(m_fdc, FUNC(upd72069_device::map)).umask16(0x00ff);
  	map(0x0040, 0x0047).rw(m_klcs, FUNC(i8255_device::read), FUNC(i8255_device::write)).umask16(0x00ff);
-@@ -356,6 +1344,8 @@ void s3000_state::s3000xl_io_map(address_map &map)
+@@ -356,6 +1345,8 @@ void s3000_state::s3000xl_io_map(address_map &map)
  	map(0x0080, 0x008f).m(m_dsp, FUNC(l7a1045_sound_device::map));
  	map(0x00a0, 0x00a5).nopw(); // quiet writes to the effects DSP
  	map(0x00c0, 0x00c7).rw(m_wadcs, FUNC(i8255_device::read), FUNC(i8255_device::write)).umask16(0x00ff);
@@ -2379,7 +1869,7 @@ index 44db8253..390b9bc3 100644
  }
  
  // stock wave memory is 4x HM514400 1Mx4 = 2 MiB
-@@ -531,6 +1521,1112 @@ HD44780_PIXEL_UPDATE(s3000_state::lcd_pixel_update)
+@@ -531,6 +1522,1112 @@ HD44780_PIXEL_UPDATE(s3000_state::lcd_pixel_update)
  	}
  }
  
@@ -3492,7 +2982,7 @@ index 44db8253..390b9bc3 100644
  uint16_t s3000_state::dma_mem16r_cb(offs_t offset)
  {
  	return m_maincpu->space(AS_PROGRAM).read_word(offset << 1);
-@@ -588,8 +2684,13 @@ void s3000_state::base(machine_config &config)
+@@ -588,8 +2685,13 @@ void s3000_state::base(machine_config &config)
  	m_maincpu->out_memw_cb().set(FUNC(s3000_state::dma_memw_cb));
  	m_maincpu->in_mem16r_cb().set(FUNC(s3000_state::dma_mem16r_cb));
  	m_maincpu->out_mem16w_cb().set(FUNC(s3000_state::dma_mem16w_cb));
@@ -3508,7 +2998,7 @@ index 44db8253..390b9bc3 100644
  	m_maincpu->sint_handler_cb().set_inputline(m_maincpu, INPUT_LINE_IRQ0);
  	m_maincpu->txrdy_handler_cb().set_inputline(m_maincpu, INPUT_LINE_IRQ4);
  
-@@ -598,7 +2699,54 @@ void s3000_state::base(machine_config &config)
+@@ -598,7 +2700,54 @@ void s3000_state::base(machine_config &config)
  	m_maincpu->in_ior_cb<1>().set(m_fdc, FUNC(upd72069_device::dma_r));
  	m_maincpu->out_iow_cb<1>().set(m_fdc, FUNC(upd72069_device::dma_w));
  	m_maincpu->in_io16r_cb<3>().set(m_dsp, FUNC(l7a1045_sound_device::dma_r16_cb));
@@ -3564,7 +3054,7 @@ index 44db8253..390b9bc3 100644
  
  	m_maincpu->set_tclk(32_MHz_XTAL/32); // only timer 2 uses external TCLK, and it needs to be ~1 MHz for panel key repeat to be sane
  	m_maincpu->v53_tout_handler<0>().set_inputline(m_maincpu, INPUT_LINE_IRQ1);
-@@ -606,7 +2754,7 @@ void s3000_state::base(machine_config &config)
+@@ -606,7 +2755,7 @@ void s3000_state::base(machine_config &config)
  	constexpr XTAL V53_CLKOUT = 32_MHz_XTAL / 2;
  //  constexpr XTAL V53_PCLKOUT = 32_MHz_XTAL / 4;
  
@@ -3573,7 +3063,7 @@ index 44db8253..390b9bc3 100644
  
  	SCREEN(config, m_screen, SCREEN_TYPE_LCD);
  	m_screen->set_refresh_hz(80);
-@@ -625,7 +2773,11 @@ void s3000_state::base(machine_config &config)
+@@ -625,7 +2774,11 @@ void s3000_state::base(machine_config &config)
  	m_fdc->drq_wr_callback().set(m_maincpu, FUNC(v53a_device::dreq_w<1>));
  	m_fdc->ts_rd_callback().set(FUNC(s3000_state::ts_r));
  
@@ -3586,7 +3076,7 @@ index 44db8253..390b9bc3 100644
  
  	HD61830(config, m_lcdc, 4.9152_MHz_XTAL / 2 / 2); // LC7981
  
-@@ -680,13 +2832,87 @@ void s3000_state::base(machine_config &config)
+@@ -680,13 +2833,87 @@ void s3000_state::base(machine_config &config)
  
  	SPEAKER(config, "speaker", 2).front();
  
@@ -3675,7 +3165,7 @@ index 44db8253..390b9bc3 100644
  	TIMER(config, "dialtimer").configure_periodic(FUNC(s3000_state::dial_timer_tick), attotime::from_hz(60.0));
  }
  
-@@ -696,7 +2922,7 @@ void s3000_state::s2000(machine_config &config)
+@@ -696,7 +2923,7 @@ void s3000_state::s2000(machine_config &config)
  	m_maincpu->set_clock(31.9488_MHz_XTAL);
  	m_maincpu->set_addrmap(AS_PROGRAM, &s3000_state::s2000_map);
  	m_maincpu->set_addrmap(AS_IO, &s3000_state::s2000_io_map);
@@ -3684,7 +3174,7 @@ index 44db8253..390b9bc3 100644
  
  	config.device_remove("lcdc");
  
-@@ -725,13 +2951,61 @@ void s3000_state::s3000xl(machine_config &config)
+@@ -725,13 +2952,61 @@ void s3000_state::s3000xl(machine_config &config)
  	base(config);
  	m_maincpu->set_addrmap(AS_PROGRAM, &s3000_state::s3000xl_map);
  	m_maincpu->set_addrmap(AS_IO, &s3000_state::s3000xl_io_map);

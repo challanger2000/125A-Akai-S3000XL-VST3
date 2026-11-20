@@ -14,6 +14,13 @@
 - While firmware recording (strobe high), host direct monitoring is disabled to avoid doubling the original MAME recorder's existing monitor voices.
 - MAIN VOLUME is applied after this addition. The eight independent outputs, DSP and firmware are unaffected. No extra MON control appears in the DAW GUI.
 
+## MAME 0.288 patch rebase
+The first independent Actions `git apply --check` against the official `mamedev/mame` `mame0288` tag discovered **pre-existing upstream portability errors**:
+- The Tuth patch tried to instrument `upd71071_device` methods in `am9517a.cpp`, but the official MAME 0.288 uses `v5x_dmau_device`. That separate patch fragment contained only diagnostic additions and **no deleted or modified original lines**. It was removed rather than transplanting obsolete diagnostic probes. The actual DSP and recording patches remain intact.
+- The official `s3000.cpp` contains an additional preexisting `m_floppy_led.resolve();` line that the original patch did not include in its machine-start context. It was added as an unchanged context line and hunk offsets were recomputed, without deleting or changing that original code.
+- Both changes are a baseline/compatibility fix, not a behavioral change to Akai audio. Re-run the independent patch applicability check on each subsequent patch revision.
+- This does **not** assert a successful full MAME compile or ROM boot.
+
 ## Validation and uncertainty
 - `tests/AkaiFirmwareMonitorTests.cpp` tests the known WADCS transition policy and gain-mixing arithmetic; it **does not** prove bit 5 is the original MON state.
 - **P002 is an instrumented candidate implementation, not accepted firmware emulation** until the ROM-backed runs demonstrate: RECORD page MON→MOFF toggle, MOFF→MON toggle, ARM (auto-enable), GO and STOP (auto-disable), mono then stereo and vice versa, correct LEFT/RIGHT, no duplicate monitor during recording, and no influence on recorded PCM.
