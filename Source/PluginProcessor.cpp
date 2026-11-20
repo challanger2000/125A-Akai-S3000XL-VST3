@@ -1920,7 +1920,10 @@ void EnsoniqSD1AudioProcessor::setCurrentProgram (int index)
 
 const juce::String EnsoniqSD1AudioProcessor::getProgramName (int index)
 {
-    return {};
+    // JUCE exports one VST3 host program placeholder. An empty name violates
+    // Steinberg's Scan Programs test, even before original Akai ROM boot.
+    // This is NOT a guest Akai program/keygroup and never changes guest state.
+    return index == 0 ? juce::String("Akai S3000XL") : juce::String();
 }
 
 void EnsoniqSD1AudioProcessor::changeProgramName (int index, const juce::String& newName)

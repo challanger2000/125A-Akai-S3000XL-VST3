@@ -11,6 +11,7 @@ on:
       - '.github/workflows/windows-full-vst3.yml'
 permissions:
   contents: read
+  actions: read
 concurrency:
   group: akai-vst3-windows-${{ github.ref }}
   cancel-in-progress: true
@@ -102,3 +103,30 @@ jobs:
           path: build/windows/**/VST3/**
           if-no-files-found: error
           retention-days: 7
+      - name: Download pinned production 125A Plugin Tester v0.3.2
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          gh run download 39823684764 --repo challanger2000/125A-Plugin-Tester-Final --name 125A-Plugin-Tester-v0.3.2-Windows-x64 --dir tester
+          if ($LASTEXITCODE -ne 0) {throw "Could not download pinned 125A Tester"}
+      - name: Run complete Windows VST3 and Steinberg host QA
+        id: qa
+        continue-on-error: true
+        shell: pwsh
+        run: ./scripts/build/run_windows_qa.ps1
+      - name: Preserve actual 125A QA reports on success or failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: 125A-Akai-S3000XL-Windows-REAL-Host-QA
+          path: build/windows-qa-reports/**
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Require production tester and official Steinberg validator PASS
+        if: always()
+        shell: pwsh
+        env:
+          QA_OUTCOME: ${{ steps.qa.outcome }}
+        run: |
+          if ($env:QA_OUTCOME -ne 'success') {throw "REAL VST3 QA IS NOT PASS. See Windows host diagnostics. Never release."}
