@@ -65,6 +65,11 @@ images or a separate executable.
   even a successful MAME `git apply --check` is not a MAME build or LCD
   success. No firmware boot/audio/DAW result may be claimed yet.
 
+## Verified isolated CI evidence (2026-11-20)
+- Native C++ [core contract run 44814083309](https://github.com/challanger2000/125A-Akai-S3000XL-VST3/actions/runs/44814083309): **4/4 CTest PASS on Windows and 4/4 PASS on Ubuntu**. The fourth `akai_capture_controller_contract` checks generated SAMPLE/REC/ARM/GO control pulses, refusal to overwrite, missing/invalid LCD states, 120 ms hold/release, original WADCS GO and STOP, WAV end and cancellation.
+- Official MAME 0.288 [patch application check 44814083347](https://github.com/challanger2000/125A-Akai-S3000XL-VST3/actions/runs/44814083347): **PASS** including the new HD61830 text snapshot. This proves `git apply --check` against the upstream `mame0288` tree only.
+- **NOT tested:** actual MAME compilation/linking, true ROM LCD mode/snapshot readout, any automatically recorded Akai sample, Keygroup/MIDI program mapping, host project recall or full Windows VST3. Do not treat the two green CI workflows as any of these.
+
 ## Test contract
 - `tests/AkaiCaptureAutomationTests.cpp`: sample/setup navigation, positive
   120 ms key pulses, `- new -` overwrite gate, WADCS ARM, LCD WAITING state,
