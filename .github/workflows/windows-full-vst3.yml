@@ -47,6 +47,11 @@ jobs:
         run: |
           python scripts/build/generate_open_resources.py --mame-root external/mame --out build/resource-proof
           if ($LASTEXITCODE -ne 0) { throw "Failed to generate MAME layout resources" }
+      - name: Syntax-check the offline ROM packer without exposing any ROMs
+        shell: pwsh
+        run: |
+          python -m py_compile scripts/build/pack_private_rom_overlay.py
+          if ($LASTEXITCODE -ne 0) { throw "Private offline packer is invalid" }
       - name: Generate native VS2022 projects for MAME
         shell: msys2 {0}
         working-directory: external/mame

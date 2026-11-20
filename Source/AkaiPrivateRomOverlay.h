@@ -37,7 +37,7 @@ inline bool readRomsFromOwnDll(juce::MemoryBlock& firmware, juce::MemoryBlock& d
         reinterpret_cast<HMODULE>(&__ImageBase), path, DWORD(std::size(path)));
     if (count == 0 || count >= std::size(path))
         return false;
-    juce::FileInputStream file(juce::File(juce::String(path)));
+    juce::FileInputStream file { juce::File { juce::String { path } } };
     if (file.failedToOpen())
         return false;
     const auto total = file.getTotalLength();
