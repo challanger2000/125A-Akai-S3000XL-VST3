@@ -88,6 +88,11 @@ jobs:
         run: |
           cmake --build build/windows --config Release --target AkaiS3000XL_VST3 --parallel 2
           if ($LASTEXITCODE -ne 0) { throw "Actual Windows VST3 compile/link failed" }
+      - name: Validate and canonicalize VST3 moduleinfo as strict JSON
+        shell: pwsh
+        run: |
+          python scripts/build/validate_moduleinfo.py --root build/windows
+          if ($LASTEXITCODE -ne 0) { throw "VST3 moduleinfo JSON invalid" }
       - name: Confirm build output exists
         shell: pwsh
         run: |

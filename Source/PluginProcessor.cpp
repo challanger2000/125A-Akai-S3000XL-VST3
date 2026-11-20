@@ -3283,7 +3283,7 @@ void EnsoniqSD1AudioProcessor::checkRomAndBootMame()
         isRomInvalid.store(true,std::memory_order_release);
         isMameRunning.store(false,std::memory_order_release);
         missingFilesList.clear();
-        missingFilesList.add("Private ROM extraction or verification failed.");
+        missingFilesList = "Private ROM extraction or verification failed.";
         return;
     }
 #elif defined(AKAI_RUNTIME_ROM_OVERLAY)
@@ -3295,7 +3295,7 @@ void EnsoniqSD1AudioProcessor::checkRomAndBootMame()
         isRomInvalid.store(true,std::memory_order_release);
         isMameRunning.store(false,std::memory_order_release);
         missingFilesList.clear();
-        missingFilesList.add("Private original Akai ROMs are not embedded.");
+        missingFilesList = "Private original Akai ROMs are not embedded.";
         return;
     }
 #else

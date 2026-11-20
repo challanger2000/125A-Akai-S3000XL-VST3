@@ -10,6 +10,8 @@ ROMs, MUST NOT be uploaded to public GitHub, CI or distributed to third parties.
 from __future__ import annotations
 import argparse
 import hashlib
+import json
+from validate_moduleinfo import strip_trailing_commas
 from pathlib import Path
 import struct
 import zipfile
@@ -85,6 +87,16 @@ def main() -> None:
     if len(dlls) != 1 or len(modules) != 1 or not any(
             x.endswith("/Resources/moduleinfo.json") for x in files):
         raise ValueError("The source artifact does not contain exactly one complete VST3")
+    # The pinned JUCE 8.0.12 build currently includes eight trailing commas
+    # in moduleinfo.json. Strict JSON hosts reject this. Canonicalize metadata
+    # in the privately assembled bundle without touching the VST3 PE binary.
+    module_path = next(p for p in files if p.endswith("/Resources/moduleinfo.json"))
+    clean, removed = strip_trailing_commas(files[module_path].decode("utf-8"))
+    module_info = json.loads(clean)
+    if module_info.get("Name") != "125A Akai S3000XL" or len(module_info.get("Classes", [])) != 2:
+        raise ValueError("Unexpected VST3 factory metadata")
+    files[module_path] = (json.dumps(module_info, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+    print(f"PRIVATE_VST3_MODULEINFO_STRICT_JSON=PASS corrected_commas={removed}")
     target = dlls[0]
     files[target] = seal_module(files[target],firmware,display)
     args.out.parent.mkdir(parents=True,exist_ok=True)
