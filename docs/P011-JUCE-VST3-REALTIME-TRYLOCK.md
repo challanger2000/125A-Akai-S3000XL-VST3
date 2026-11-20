@@ -64,5 +64,18 @@ Preserve original hardware emulation and JUCE's serialization, change
    audio and hostile scheduler run is required before final acceptance.
 
 ## State
-**SOURCE IMPLEMENTED — REAL WINDOWS REBUILD/TEST PENDING.**
-Do not claim P011 QA PASS before the new full runner reports it.
+**ROM-free Windows VST3 and host QA: PASS for actual run 44837428505.**
+- MSVC Windows x64 full MAME 0.288 + JUCE 8.0.12 build: PASS.
+- Exact package manifest moduleinfo.json strict-JSON verification: PASS.
+- Native Windows 125A Plugin Tester v0.3.2: **55 PASS, 0 WARNING, 0 FAIL**.
+- VST3 SDK v3.8.1_build_84 official validator: PASS.
+- Import-slot callback tracing in 32 host-paced blocks: **0 allocation,
+  0 potentially blocking Win32 API calls**; measured max callback 3.5 µs.
+- Editor lifecycle, multi-instance probe, 50 host profile setups, 5 module
+  reloads, state API and Steinberg validation: PASS.
+- Independent [Windows full runner and evidence](https://github.com/challanger2000/125A-Akai-S3000XL-VST3/actions/runs/44837428505).
+- **Scope remains ROM-FREE:** the runtime original-Akai MIDI/audio signal,
+  native sample RAM state and the private packed DLL's original V2.0 firmware
+  boot have NOT been executed. The owner's V2.0 ROMs are bundled separately
+  into the private P011 test package and both SHA256 hashes match. Packaging
+  verification is **NOT a firmware boot proof**.
