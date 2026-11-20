@@ -9,6 +9,7 @@
 */
 
 #include "PluginProcessor.h"
+#include "AkaiAnalogControls.h"
 #include "PluginEditor.h"
 
 #include <iostream>
@@ -168,10 +169,18 @@ void EnsoniqSD1AudioProcessor::pushAudioToMame(const juce::AudioBuffer<float>& b
         samplerInRead.store(w + numSamples - SAMPLER_IN_FRAMES, std::memory_order_release);
     }
 
+    // Physical REC GAIN: analogue input attenuation before MAME A/D.
+    const float gainTarget = recGainParameter != nullptr
+        ? AkaiAnalogControls::normalized(recGainParameter->load(std::memory_order_relaxed)) : 1.0f;
+    const float gainStep = AkaiAnalogControls::smoothingCoefficient(
+        static_cast<float>(hostSampleRate.load(std::memory_order_relaxed)));
     for (int i = 0; i < numSamples; ++i) {
+        smoothedRecGain = AkaiAnalogControls::smooth(smoothedRecGain, gainTarget, gainStep);
         const size_t slot = static_cast<size_t>((w + i) & (SAMPLER_IN_FRAMES - 1)) * SAMPLER_IN_CHANNELS;
-        samplerInRing[slot + 0] = static_cast<int16_t>(juce::jlimit(-32768.0f, 32767.0f, inL[i] * 32767.0f));
-        samplerInRing[slot + 1] = static_cast<int16_t>(juce::jlimit(-32768.0f, 32767.0f, inR[i] * 32767.0f));
+        const float left = AkaiAnalogControls::recordInput(inL[i], smoothedRecGain);
+        const float right = AkaiAnalogControls::recordInput(inR[i], smoothedRecGain);
+        samplerInRing[slot + 0] = static_cast<int16_t>(juce::jlimit(-32768.0f, 32767.0f, left * 32767.0f));
+        samplerInRing[slot + 1] = static_cast<int16_t>(juce::jlimit(-32768.0f, 32767.0f, right * 32767.0f));
     }
     samplerInWritten.store(w + numSamples, std::memory_order_release);
 }
@@ -1365,6 +1374,11 @@ juce::AudioProcessorValueTreeState::ParameterLayout EnsoniqSD1AudioProcessor::cr
     params.push_back(std::make_unique<juce::AudioParameterChoice>(
         juce::ParameterID("layout_view", 1), "Panel Layout", views, 0, nonAutomatable));
 
+    // Preserve all existing parameter IDs/ordering: legacy "volume" is MIDI CC7.
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        "rec_gain", "REC GAIN", 0.0f, 1.0f, 1.0f));
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        "main_volume", "MAIN VOLUME", 0.0f, 1.0f, 1.0f));
     return { params.begin(), params.end() };
 }
 
@@ -1531,6 +1545,9 @@ EnsoniqSD1AudioProcessor::EnsoniqSD1AudioProcessor()
                             .getChildFile("S3000XL_Instance_" + juce::Uuid().toString())
                             .getFullPathName();
     
+    recGainParameter = apvts.getRawParameterValue("rec_gain");
+    mainVolumeParameter = apvts.getRawParameterValue("main_volume");
+    jassert(recGainParameter != nullptr && mainVolumeParameter != nullptr);
     apvts.addParameterListener("volume", this);
     apvts.addParameterListener("data_entry", this);
     apvts.addParameterListener("pitch_bend", this);
@@ -1703,6 +1720,12 @@ void EnsoniqSD1AudioProcessor::prepareToPlay (double sampleRate, int samplesPerB
     if (!ensoniqDir.exists()) ensoniqDir.createDirectory();
 
     hostSampleRate.store(sampleRate);
+    // Apply recalled analogue levels immediately at host activation; only live
+    // knob movements are smoothed. This prevents stale startup level surprises.
+    smoothedRecGain = recGainParameter != nullptr
+        ? AkaiAnalogControls::normalized(recGainParameter->load(std::memory_order_relaxed)) : 1.0f;
+    smoothedMainVolume = mainVolumeParameter != nullptr
+        ? AkaiAnalogControls::normalized(mainVolumeParameter->load(std::memory_order_relaxed)) : 1.0f;
     
     auto* choiceParam = dynamic_cast<juce::AudioParameterChoice*>(apvts.getParameter("buffer_size"));
         if (choiceParam != nullptr) {
@@ -2435,6 +2458,17 @@ void EnsoniqSD1AudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, j
             }
         }
     
+                // Physical MAIN VOLUME: attenuate only stereo L/R after original
+                // MAME DSP. Individual outs 1-8 remain bit-identical.
+                const float mainTarget = mainVolumeParameter != nullptr
+                    ? AkaiAnalogControls::normalized(mainVolumeParameter->load(std::memory_order_relaxed)) : 1.0f;
+                const float mainStep = AkaiAnalogControls::smoothingCoefficient(static_cast<float>(sr));
+                for (int i = 0; i < numSamples; ++i) {
+                    smoothedMainVolume = AkaiAnalogControls::smooth(smoothedMainVolume, mainTarget, mainStep);
+                    if (outL != nullptr) outL[i] *= smoothedMainVolume;
+                    if (outR != nullptr) outR[i] *= smoothedMainVolume;
+                }
+
                 // ========================================================
                 // AU BOUNCE "NO-READ-AHEAD" GATE (Logic Pro specifically isolated)
                 // ========================================================

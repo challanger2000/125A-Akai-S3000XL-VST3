@@ -43,5 +43,9 @@ static const MPCClickRect mpcClickMap[] = {
     { 4100.6f, 692.4f, 154.9f, 331.7f, 35 }, // btn_left
     { 4095.0f, 25.0f, 215.0f, 530.0f, 36 }, // btn_dial_dec
     { 4310.0f, 25.0f, 215.0f, 530.0f, 37 }, // btn_dial_inc
+    // Based on original MAME 0.288 s3000xl.lay knob group rectangles:
+    // REC group x=4645, MAIN group x=5060, 635x640 / 740x740 transform.
+    { 4737.0f, 170.0f, 224.0f, 244.0f, 38 }, // REC GAIN
+    { 5152.0f, 170.0f, 224.0f, 244.0f, 39 }, // MAIN VOLUME
 };
 static constexpr int MPC_CLICK_COUNT = (int)(sizeof(mpcClickMap)/sizeof(mpcClickMap[0]));

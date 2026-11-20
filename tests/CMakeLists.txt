@@ -1,0 +1,6 @@
+cmake_minimum_required(VERSION 3.20)
+project(AkaiAnalogControlContract LANGUAGES CXX)
+enable_testing()
+add_executable(akai_analog_control_tests AkaiAnalogControlsTests.cpp)
+target_compile_features(akai_analog_control_tests PRIVATE cxx_std_20)
+add_test(NAME akai_analog_control_contract COMMAND akai_analog_control_tests)

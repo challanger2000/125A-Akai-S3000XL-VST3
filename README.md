@@ -27,8 +27,10 @@ Working:
 
 Not yet implemented:
 
-* `REC GAIN` and `REC VOLUME` — the analogue stage ahead of the converter is not modelled, so the
-  front-panel controls do nothing. Set the level in your host instead.
+* **125A development branch:** physical `REC GAIN` and `MAIN VOLUME` control paths are now coded
+  (pre-A/D and Main L/R output respectively). This source change has **not** yet passed a native
+  Windows VST3 build or firmware-backed/DAW test. Analogue potentiometer tapers are not yet calibrated.
+  The original second knob is MAIN VOLUME, not REC VOLUME (Akai S3000XL manual, p.18).
 * Monitoring the input *before* a recording starts (the `MON` button).
 * Sample **loading** is slower than the hardware, a known cost of getting the transfer rate right.
 

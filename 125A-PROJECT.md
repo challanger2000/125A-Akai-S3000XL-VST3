@@ -42,6 +42,15 @@ The **user-facing workflow should match the Emulator II/III**: directly choose/l
 - The upstream save-state code visibly serializes SD-1 `osram`/`seqram` shares; that is **not a proof** S3000XL sample RAM and programs are restored correctly. True sample/project recall is a priority.
 - MAME global process state may prevent safe simultaneous VST instances, as upstream port notes warn. Verify, do not assume.
 
+## P001 implementation in development (not yet Windows-built)
+- **REC GAIN and MAIN VOLUME source wiring implemented** on `develop/v1.0.0`. The original Akai operator's manual identifies the second knob as **MAIN VOLUME**, not "REC VOLUME".
+- Native MAME-panel hotspots now carry real host parameter gestures, and values reach pre-A/D input attenuation and the post-DSP Main L/R output attenuation, respectively. OUT 1..8 are intentionally unaffected by MAIN VOLUME.
+- The original `volume` MIDI CC7 parameter, hardware emulation core, MIDI and ROM paths are unchanged.
+- **Functional level contract unit test** compiled and executed on Linux/g++ using byte-identical Git blobs: 9,617 checks PASS (endpoints, stereo/polarity, nonfinite handling and 5ms smoothing). **This does not certify Windows VST3 compilation, physical-pot calibration, firmware sampling, GUI interaction or DAW recall.**
+- The correct analogue potentiometer taper is not documented; current 0..1 curve is a safe, explicitly approximate attenuation with unity matching upstream.
+- The **Mon** softkey / meter monitoring remains open and is not a physical analogue knob.
+- See `docs/P001-ANALOG-CONTROLS.md` for provenance and remaining verification.
+
 ## Development order
 1. Reproduce a Windows x64 VST3 build from the upstream baseline (JUCE, MAME 0.288, Visual Studio 2022).
 2. Verify boot, firmware/ROM requirements, MIDI, 10 audio outputs, sampling, media loading and original sound path.
@@ -69,4 +78,4 @@ The **user-facing workflow should match the Emulator II/III**: directly choose/l
 - Revision: `d4a5042dffa26fd833eafae5c0cc9d26e69ef99e`
 - License: GPLv3, see `LICENSE`
 
-**Current status:** Source import/inspection only. No new build, ROM boot, audio or DAW test is claimed.
+**Current development status:** P001 analogue controls coded with isolated C++ unit tests; native Windows build, original firmware operation, integrated audio and host/DAW validation remain NOT RUN. Stable upstream import remains on `main`.

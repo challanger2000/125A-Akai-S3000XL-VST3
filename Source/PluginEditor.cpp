@@ -752,6 +752,9 @@ void EnsoniqSD1AudioProcessorEditor::paint (juce::Graphics& g)
     float saveAlpha = saveBadge.isEnabled() ? 1.0f : 0.4f;
     juce::ignoreUnused(saveX, saveY, saveW, saveH, saveAlpha); // S3000XL: "Save Program" badge removed (overlapped the LCD; unused on MPC)
 
+    if (audioProcessor.requestedViewIndex.load(std::memory_order_acquire) != 4)
+        paintAnalogKnobIndicators(g);
+
     // ==============================================================================
     // --- 4. SETTINGS OVERLAY (Dimmed background & Settings Panel)
     // ==============================================================================
@@ -1006,6 +1009,9 @@ void EnsoniqSD1AudioProcessorEditor::paint (juce::Graphics& g)
         juce::ignoreUnused(saveX, saveY, saveW, saveH, saveAlpha); // S3000XL: "Save Program" badge removed (overlapped the LCD; unused on MPC)
     }
 
+    if (audioProcessor.requestedViewIndex.load(std::memory_order_acquire) != 4)
+        paintAnalogKnobIndicators(g);
+
     // ==============================================================================
     // --- 4. SETTINGS OVERLAY (Dimmed background & Settings Panel)
     // ==============================================================================
@@ -1238,8 +1244,25 @@ void EnsoniqSD1AudioProcessorEditor::mouseDown(const juce::MouseEvent& e) {
     
     if (audioProcessor.requestedViewIndex.load(std::memory_order_acquire) == 4) return;
     if (isSettingsVisible || getWidth() <= 0 || getHeight() <= 0) return;
-    // S3000XL buttons: drive the reliable set_value path (buttonParams) via layout hit-test.
+    // These two zones represent hardware analogue knobs, not matrix buttons.
     const int mpcIdx = mpcHitTest(e.x, e.y);
+    if (mpcIdx == 38 || mpcIdx == 39) {
+        if (auto* parameter = analogParameter(mpcIdx)) {
+            if (e.mods.isCtrlDown()) {
+                parameter->beginChangeGesture();
+                parameter->setValueNotifyingHost(parameter->getDefaultValue());
+                parameter->endChangeGesture();
+            } else {
+                activeAnalogKnob = mpcIdx;
+                analogKnobStartY = e.y;
+                analogKnobStartValue = parameter->getValue();
+                parameter->beginChangeGesture();
+            }
+            repaint();
+        }
+        return;
+    }
+    // Matrix buttons still follow the original MAME GPIO signal.
     if (mpcIdx >= 0) {
         // DATA ENTRY dial zones (btn_dial_dec=36 left, btn_dial_inc=37 right): click = 1 step,
         // then drag up/down to turn continuously.
@@ -1274,6 +1297,13 @@ void EnsoniqSD1AudioProcessorEditor::mouseUp(const juce::MouseEvent& e) {
     
     if (audioProcessor.requestedViewIndex.load(std::memory_order_acquire) == 4) return;
     if (isSettingsVisible || getWidth() <= 0 || getHeight() <= 0) return;
+    if (activeAnalogKnob >= 0) {
+        if (auto* parameter = analogParameter(activeAnalogKnob))
+            parameter->endChangeGesture();
+        activeAnalogKnob = -1;
+        repaint();
+        return;
+    }
     if (dialDragActive) { dialDragActive = false; return; }
     // S3000XL: release the button pressed via buttonParams on mouse-down.
     if (mpcPressedIndex >= 0) {
@@ -1305,6 +1335,15 @@ void EnsoniqSD1AudioProcessorEditor::mouseDrag(const juce::MouseEvent& e) {
     
     if (audioProcessor.requestedViewIndex.load(std::memory_order_acquire) == 4) return;
     if (isSettingsVisible || getWidth() <= 0 || getHeight() <= 0) return;
+    if (activeAnalogKnob >= 0) {
+        if (auto* parameter = analogParameter(activeAnalogKnob)) {
+            const float v = juce::jlimit(0.0f, 1.0f, analogKnobStartValue
+                + static_cast<float>(analogKnobStartY - e.y) / 150.0f);
+            parameter->setValueNotifyingHost(v);
+            repaint();
+        }
+        return;
+    }
     if (dialDragActive) {
         int steps = (dialDragLastY - e.y) / 2;   // drag up = increase; ~2 px per step
         if (steps != 0) {
@@ -1334,6 +1373,58 @@ void EnsoniqSD1AudioProcessorEditor::mouseMove(const juce::MouseEvent& e) {
     if (audioProcessor.requestedViewIndex.load(std::memory_order_acquire) == 4) return;
     if (isSettingsVisible || getWidth() <= 0 || getHeight() <= 0) return;
     audioProcessor.injectMouseMove(e.x, e.y);
+}
+
+juce::RangedAudioParameter* EnsoniqSD1AudioProcessorEditor::analogParameter(int knobIndex) const
+{
+    if (knobIndex == 38) return audioProcessor.apvts.getParameter("rec_gain");
+    if (knobIndex == 39) return audioProcessor.apvts.getParameter("main_volume");
+    return nullptr;
+}
+
+void EnsoniqSD1AudioProcessorEditor::mouseWheelMove(
+    const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel)
+{
+    if (isSettingsVisible || audioProcessor.requestedViewIndex.load(std::memory_order_acquire) == 4) return;
+    const int idx = mpcHitTest(e.x, e.y);
+    if (idx != 38 && idx != 39) return;
+    if (auto* parameter = analogParameter(idx)) {
+        const float v = juce::jlimit(0.0f, 1.0f, parameter->getValue() + wheel.deltaY * 0.06f);
+        parameter->beginChangeGesture();
+        parameter->setValueNotifyingHost(v);
+        parameter->endChangeGesture();
+        repaint();
+    }
+}
+
+void EnsoniqSD1AudioProcessorEditor::paintAnalogKnobIndicators(juce::Graphics& g)
+{
+    const float w = static_cast<float>(getWidth());
+    const float h = static_cast<float>(getHeight());
+    if (w <= 0.0f || h <= 0.0f) return;
+    const float scale = juce::jmin(w / MPC_VIEW_W, h / MPC_VIEW_H);
+    const float ox = (w - MPC_VIEW_W * scale) * 0.5f;
+    const float oy = (h - MPC_VIEW_H * scale) * 0.5f;
+    // Knob centres derived from stock MAME s3000xl.lay group transforms.
+    // A discreet position dot leaves the original MAME artwork intact.
+    auto drawOne = [&](int idx, float x, juce::Colour colour) {
+        auto* p = analogParameter(idx);
+        if (p == nullptr) return;
+        const float v = juce::jlimit(0.0f, 1.0f, p->getValue());
+        const float theta = (v * 270.0f - 135.0f) * juce::MathConstants<float>::pi / 180.0f;
+        const float cx = ox + x * scale;
+        const float cy = oy + 292.2f * scale;
+        const float rad = 91.0f * scale;
+        const float mx = cx + std::sin(theta) * rad;
+        const float my = cy - std::cos(theta) * rad;
+        const float sz = juce::jmax(2.0f, 17.0f * scale);
+        g.setColour(juce::Colours::black.withAlpha(0.75f));
+        g.fillEllipse(mx - sz * 0.65f, my - sz * 0.65f, sz * 1.3f, sz * 1.3f);
+        g.setColour(colour);
+        g.fillEllipse(mx - sz * 0.5f, my - sz * 0.5f, sz, sz);
+    };
+    drawOne(38, 4848.4f, juce::Colour(0xffaf4f40));
+    drawOne(39, 5263.4f, juce::Colour(0xffdfdfc6));
 }
 
 void EnsoniqSD1AudioProcessorEditor::loadMediaButtonClicked()

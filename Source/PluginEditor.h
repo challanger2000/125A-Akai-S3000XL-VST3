@@ -34,10 +34,16 @@ public:
     void mouseUp   (const juce::MouseEvent& e) override;
     void mouseDrag (const juce::MouseEvent& e) override;
     void mouseMove (const juce::MouseEvent& e) override;
+    void mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel) override;
 
     // --- S3000XL panel click -> buttonParams[] (reliable set_value path) ---
     int mpcHitTest(int px, int py);
     int mpcPressedIndex = -1;
+    int activeAnalogKnob = -1; // 38=REC GAIN, 39=MAIN VOLUME
+    int analogKnobStartY = 0;
+    float analogKnobStartValue = 1.0f;
+    juce::RangedAudioParameter* analogParameter(int knobIndex) const;
+    void paintAnalogKnobIndicators(juce::Graphics& g);
     // DATA ENTRY dial drag state
     bool dialDragActive = false;
     int  dialDragLastY = 0;

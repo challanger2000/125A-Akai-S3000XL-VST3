@@ -358,6 +358,11 @@ public:
     std::atomic<uint32_t> mouseButtons{ 0 };
 
     juce::AudioProcessorValueTreeState apvts;
+    // Hardware input/output level controls: cached atomics, callback thread reads.
+    std::atomic<float>* recGainParameter = nullptr;
+    std::atomic<float>* mainVolumeParameter = nullptr;
+    float smoothedRecGain = 1.0f;
+    float smoothedMainVolume = 1.0f;
     juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
 
     // Triggered by the DAW when an automation parameter changes
