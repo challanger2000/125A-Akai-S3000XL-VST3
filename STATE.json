@@ -1,0 +1,501 @@
+{
+  "project": "S3000XL-VST — Akai S3000XL sampler wrapped as a VST3/AU instrument (MAME 0.288 core in a Sojus-style JUCE host)",
+  "protocol": "A2A: the repo/source is the judge. Grep before claiming. The compiler & DAW are the judges. See MAME-to-VSTi-RECIPE.md.",
+  "version": "STATE v3 (S3000XL) — v1.1: the DATA ENTRY dial is now an ENDLESS (wrapping) encoder.",
+  "DATA_ENTRY_DIAL_WRAP": "The dial no longer clamps at either end. Four juce::jlimit(0,255,...) clamps were replaced with & 0xFF: the click step and the drag step in PluginEditor.cpp, the 'data_entry' parameter handler, and the OSD apply block that calls analog->set_value(). Rationale: PORT_BIT(0xff, 0x00, IPT_DIAL) gives the firmware an ABSOLUTE position from which it derives rotation, so wrapping 255->0 and 0->255 is what the hardware knob does — clamping made it feel like it hit a stop. The same design was implemented from scratch for the MPC3000 this round (see MPC3000_Port/STATE.json DATA_ENTRY_DIAL). User-verified in the host.",
+  "PUBLISHED": {
+    "repo": "https://github.com/Tuth/S3000XL-VST (public, GPLv3, NO ROMs). Release v1.0 with the win64 VST3 zip.",
+    "history_note": "IMPORTANT: the local 'master' branch history CONTAINS the firmware ROM blob (added in fec8792, removed in ace78e3). It must NEVER be pushed. The public repo was created from an ORPHAN branch 'public' (pushed as origin/main) so no ROM object is reachable from anything published. Keep publishing from 'public'; if you ever need to publish master, purge the blob first (git filter-repo).",
+    "lcd_fix": "LCD live-refresh FIXED (was the last open item): the OSD dirty-frame hash only mixed prim->texture.base (the bitmap ADDRESS). The LCD renders into the same buffer, so content changes (blinking cursor, load progress) left the hash unchanged and the frame was dropped -> 'refreshes only on events'. Fix: also hash prim->texture.seqid, which MAME bumps whenever a texture's CONTENT changes. VERIFIED: cursor blinks, display live.",
+    "stereo_fix": "L7A1045 stereo voice-pair key-on fix applied (see mame-0288-l7a1045-stereo-pair-keyon.patch) — the same chip is shared with the MPC3000 family."
+  },
+  "machine": {
+    "short_name": "s3000xl",
+    "driver": "src/mame/akai/s3000.cpp (R. Belmont). Built on MPC3000-variant hardware.",
+    "core_devices": "V53A CPU, L7A1045-L6028 sound DSP, HD61830/LC7981 LCD, upd72069 FDC, MB89352 SCSI, midi_port. No 7810/7811 sub-CPU (simpler than MPC3000).",
+    "roms": "maincpu s3000xl_v2_0.bin (512K, SHA1 ace009953aeccff4dfbee0ccfa091a0fea39a386) + device ROM hd61830.bin (1472b, NEEDS REDUMP, shared with MPC3000). Folder Documents/S3000XL/ROMs/s3000xl/. NOT in git.",
+    "layout": "s3000xl.lay (view 6000x1112, wide rackmount aspect ~5.4)."
+  },
+  "WORKING": {
+    "panel_render": "AKAI S3000XL panel from the MAME layout; buttons C0..C7 via hit-test -> buttonParams -> set_value; auto-generated clickmap (36 buttons + 2 dial zones).",
+    "audio": "STEREO. m_outputs_count = 3 (verified via -wavwrite): ch0 = FLOPPY sound (dropped), ch1 = MAIN L, ch2 = MAIN R. Stride 3, take pcm[i*3+1]/[i*3+2]. Clean (RAM test + sample playback).",
+    "midi": "VST MIDI in/out via the emulated UART; responsive.",
+    "media": "Floppy + CD + HDD. HDD (.chd) and CD (.iso via cdrom_2x) load samples CLEANLY. See findings below.",
+    "dial": "DATA ENTRY = IPT_DIAL analog -> analog_field::set_value; click (+-1) + drag-to-turn + 'data_entry' VST param.",
+    "params": "45 VST params (5 float + 38 button bool + 2 choice) exposed. Requires the unique pluginCode (see findings)."
+  },
+  "KEY_FINDINGS": {
+    "audio_stride": "MAME final mix stride = m_outputs_count (machine-specific): SD-1=5, MPC3000=11, S3000XL=3. Wrong stride = gaps (too big) or scrambled audio (too small). Measure via -wavwrite WAV header. Identify main L/R; drop the floppy-sound channel.",
+    "cd_timing": "cdrom vs cdrom_2x share identity (Sony CDU-76S), differ ONLY in SCSI timing. The firmware needs cdrom_2x's paced 2x transfer to read a disc CLEANLY; plain cdrom is too fast -> corrupted sample data -> crackle. cdrom_2x does NOT slow emulation (186%). Use cdrom_2x when a disc is loaded, plain cdrom when empty.",
+    "scsi_defaults": "s3000xl PRE-POPULATES scsi:4=cdrom_2x, scsi:5=harddisk (MPC3000 leaves them empty). Don't blindly override pre-populated slots.",
+    "media_lock": "MAME opens harddisk .chd READ-WRITE EXCLUSIVE. A 2nd MAME instance (standalone MAMEUI) holding the same disk -> 'permission denied (generic:13)' -> fatal error. Don't run standalone MAME on the same disk while testing.",
+    "graceful_bootfail": "Check cli_frontend::execute() return; on failure set isMameRunning=false (no DAW freeze) + clear persisted media paths (no crash-loop).",
+    "unique_plugincode": "Each plugin needs a UNIQUE 4-char pluginCode. Shared code (both 'Mp30') = same VST3 UID = DAW confuses param caches (only Volume showed). S3000XL='S3kx', MPC3000='Mp30'.",
+    "black_panel": "Missing device ROM (hd61830.bin) -> MAME silently fails to start -> black panel. Include device ROMs in the self-check."
+  },
+  "OPEN_ITEMS": {
+    "lcd_render_pump": "The LCD only refreshes on events. OSD update() early-returned on skip_redraw (under -nothrottle MAME frameskips -> grab skipped). Decoupling from skip_redraw was applied but did NOT fully fix it. NEXT: pump the frame grab on a fixed cadence / drive video().frame_update() independent of MAME's frameskip.",
+    "max_ram": "Sample space is 32 MiB (.ram() at s3000.cpp L364). Confirm the v2.0 firmware sizes it (SIMM-ID probe); target 32 MiB, fallback 16 MiB.",
+    "format_combos": "F7+F8 (Format) and other 2-key combos are hard with mouse-only; plan: expose unused-CC button routing so a hardware controller can send them."
+  },
+  "build": "genie SUBTARGET=s3000xl SOURCES=src/mame/akai/s3000.cpp; MSVC 14.44 x64. VST3 bundle: build_plugin_s3000/Builds/VisualStudio2022/x64/Release/VST3/S3000XL-VST.vst3. Scripts in this repo (run_*.bat).",
+  "last_updated": "2026-08-29",
+  "mantra": "The chat can be lost; the repo cannot. Grep before you claim. The compiler & the DAW are the judges.",
+  "SAMPLING_2026_08_27": {
+    "issue": "GitHub #2 (bczow, S3000XL-VST v1.1, ROM v2.0): 'Trying to sample anything makes the plugin unresponsive. After pressing Go the sampler will not react to pressing any of its buttons.'",
+    "diagnosis": "NOT a plugin bug. Sampling is not implemented in the MAME driver. The A/D (WADCS) is a bare I8255 with no callbacks, referenced by nothing, and an ENTIRE I/O block at 0xC000-0xC03F was unmapped - 261 accesses in the OS ROM go there. The References/mame driver's own TODO list already says 'Recording.'",
+    "THE_WAIT": {
+      "where": "0xEF47D, found by disassembly not by guesswork",
+      "code": "ef47f: mov dx,0C001h/out dx,al (select counter 0) ; ef483: mov dx,0C004h/in ax,dx (position) ; ef487: mov si,[8570h]/cmp ax,si ; ef48d: ja 0EF496h ; ef494: jmp 0EF47Dh",
+      "target": "built at 0xEF3FE as `and bp,3FFh` - the low ten bits of the 32-bit sample address. 0xC002 is written as min(len,0x400)-1 at 0xE00B6. So 0xC004 is a position counter inside a 1024-word transfer page.",
+      "why_it_hangs": "0xC004 unmapped -> reads 0 -> the comparison never passes -> the firmware waits forever, shows 0%, and never reaches its panel scan, so F8/ABORT is dead."
+    },
+    "A_SECOND_SPINNER_NOT_THE_CAUSE": "0xEEBD9 spins on bit 7 of I/O 0x01C0 (also unmapped) before writing a byte to the WADCS at 0x00C0. It is gated by `test byte ptr [8490h],1` at 0xEEBD2 and that flag is clear on our machine, so the routine returns immediately. Ruled out by evidence, not assumed.",
+    "METHOD_NOTE_TWO_OF_MY_OWN_INSTRUMENTS_WERE_WRONG": [
+      "A raw byte scan of the ROM for in/out opcodes was NOISE and was discarded: control windows with NOTHING mapped scored 525 and 36 hits against 74 for the real one, with 256 expected by chance.",
+      "The disassembly analyser then missed every hit because unidasm prints immediates with UPPERCASE hex (1C0h) and the regex was lowercase-only.",
+      "Both were caught by controls BEFORE anything was reported. Same class as the U517 defect in the Virus work: a search that matches the wrong column."
+    ],
+    "WHAT_SHIPPED_THIS_ROUND": {
+      "plugin_input_bus": "BusesProperties gains .withInput(\"Sampler In\", stereo(), false) - DEFAULT OFF, so an existing session sees exactly the plugin it saw before. isBusesLayoutSupported accepts disabled/mono/stereo on it.",
+      "latent_bug_fixed_while_there": "processBlock cleared outputs from index totalNumInputChannels, which was only correct while that was ZERO. With an input bus the input aliases channels 0..n-1 and the offline render path leaves its tail untouched, so the input would have bled into Main Out. Now captures first, then clears from 0.",
+      "osd_audio_source": "sound_get_information now advertises m_sources=2 and a default source; sound_stream_source_open returns a real id (it returned 0 = refused, so MAME never opened an input stream at all); sound_stream_source_update serves a lock-free ring filled by processBlock. Underrun = silence, which is what a converter with nothing connected produces.",
+      "driver_sample_controller": "I/O 0xC000-0xC03F mapped in s3000xl_io_map. 0xC001 = counter select, 0xC002 = length-1, 0xC004 = page position counter, everything else honest storage (the firmware read-modify-writes 0xC00F bit by bit at 0xEEBF0/0xEEBF8, and a register reading back zero deletes what was just configured).",
+      "counter_rate_is_not_a_guess": "L7A1045 is fitted with a 33.8688 MHz crystal and divides by 768 = 44100 Hz exactly, the same figure the firmware prints on its own record screen. A 1024-word page wraps every 23.2 ms.",
+      "log_capture": "The plugin never installed an osd_output, so EVERY logerror in the MAME core went nowhere and the only evidence was what the LCD showed. VstMameLog now writes %TEMP%/s3000xl-vst.log, opt-in via %TEMP%/s3000xl-vst-log.enable so a released plugin does not write a log on every user's machine."
+    },
+    "STATUS": "ABORT still does not work after the counter model. The counter alone did not free the firmware, so either the model is wrong or 0xEF47D is not the only wait. NOT GUESSING FURTHER - the log capture exists precisely so the next run answers this instead of me speculating.",
+    "TWO_TREES_TRAP": "F:/MPC3000vsti/mame and F:/MPC3000vsti/References/mame are DIFFERENT MAME trees with different versions of s3000.cpp. THE BUILD USES References/mame (the vcxproj include paths prove it). I edited the wrong one first and reverted it. Check the vcxproj before editing.",
+    "NEXT": [
+      "Read %TEMP%/s3000xl-vst.log for SAMPCTRL-R / SAMPCTRL-W - who drives the block, with what, and whether 0xC004 is even read after the change.",
+      "FALSIFIER STILL OPEN: 0xC004 is modelled per-counter and only counter 0 moves. If playback breaks, that assumption is wrong - 0xD431B reads it then does `sub ax,91B0h`, which no 10-bit value would justify.",
+      "Then: MICROPHONE device in the driver to pull from the OSD source, and the transfer ADDRESS registers (somewhere in 0xC006/C010/C012/C020-C036) so recorded audio actually lands in sample RAM.",
+      "Then: multi-out. The Aux bus already exists and MAME's record mix is 3 interleaved channels."
+    ]
+  },
+  "SAMPLING_SESSION_2026_08_27": {
+    "outcome": "THE FREEZE IS FIXED AND THE MACHINE SAMPLES. Thor's screen shows the firmware's own level display drawing a live waveform from a TB-303 patched into the plugin. GitHub issue #2 is closed at the cause. What remains is audio QUALITY - the recording is still distorted - and the transport underneath it is now measured correct.",
+    "IS_IT_ALREADY_IMPLEMENTED_IN_MAME": {
+      "s3000xl": "NO. The A/D is `I8255(config, m_wadcs);` - a bare 8255 with zero callbacks, referenced by no handler anywhere in the file, and no DMA request line feeds it. The driver's own TODO list says 'Recording.' Nothing to reuse.",
+      "s1000": "YES, but a DIFFERENT ARCHITECTURE, and Thor was right to press on this. The S1000 has: a custom L6009 gate array supplying a real sample clock via sample_clock_cb(); TWO adc16 devices, one per channel; TWO DMA channels (0 and 1), one per channel; and therefore NO L/R INTERLEAVE AT ALL.",
+      "why_it_matters": "The S1000 pattern transfers only partially, and the part it does NOT cover - a single serial converter interleaving L and R down one DMA channel - is exactly the part that cost this session five rounds. Copying the shape of s1000.cpp was right for the wiring and useless for the hard problem."
+    },
+    "THE_INPUT_PATH_AS_ESTABLISHED": [
+      "1. Analog In PCB L6036A501B - jacks J201/J202 -> M5220P/M5220L op-amps -> W201 -> main PCB P16 (AINL/AINR). PURE ANALOG, nothing to emulate.",
+      "2. IC50 AK5339-VP - 16-bit dual A/D, 64fs oversampling with decimation filter. SERIAL output: SDATA pin 16, SCLK pin 15, L/R pin 14, CLK IN pin 23, APD/DPD power-down. The L/R pin is an OUTPUT of the converter, so the channel of each word is defined by the converter and cannot drift.",
+      "3. IC41 HD74HC244P - 3-state buffer between the PALs and the converter (FSYNC, SCLK, ADLR, SDATA, ICLKD).",
+      "4. IC29 PALCE16V8Q (L6039D) - serial clock and framing: in BTCK, LRWCK, SRCLK, SER; out PD, FSYNC, SCLK, BLRWCK, ADLR, L_OUT, SDATA, 22/44.",
+      "5. IC30 PALCE20V8Q (L6039B) - THE DMA REQUEST GENERATOR: in SDLRD, WADCS, BTCK, TORD, DAK2, 384FS, FBSY, TOUT1, D0/D1, A1; out LDMA, RDMA, 22/44, YMLR, OPDETN, ICLKD, BBTCK, DMRQ2, SIOPG.",
+      "6. V53 DMA channel 2. WADCS is a CHIP SELECT from the HD74HC154 decoder (seen on the S2000 main-board page), not a data path - which is why the 8255 was never the answer."
+    ],
+    "STILL_UNKNOWN_AND_WHAT_WOULD_SETTLE_IT": "How DMRQ2 relates to LDMA/RDMA and DAK2 inside IC30 - specifically whether the PAL asserts one request per WORD or per FRAME, and what clears it. Three rounds have been spent correcting my model of that handshake instead of reading the real one. The page showing IC29/IC30 with every pin and the nets running to the V53 is the source that ends the guessing.",
+    "TRANSPORT_NOW_MEASURED_CORRECT": "ADC-DMA 44100 words per 0.5000 s = 88200 words/s = 44100 stereo frames/s exactly; ADC-FIFO starved 0; host ring DROPPED 0; emulation ratio 0.987-1.016 around unity. Every rate in the chain agrees. The remaining distortion is therefore NOT transport.",
+    "WHAT_WAS_FIXED_AND_WHY": [
+      "DMA channel 2 wired at all - it was connected to nothing, and the firmware waited on a transfer that could never arrive. THAT was the freeze.",
+      "OSD sound_stream_source_open returned 0, which means REFUSED, so MAME never opened an input stream.",
+      "The JUCE input bus shipped default-off, so processBlock never pushed a sample however the host was wired.",
+      "The OSD node declared no channel positions, so MAME's position-based matcher built zero mixing steps and pulled nothing, silently.",
+      "adc16::read() forced a full MAME stream update 88200 times a second and cost 61 per cent of real time; replaced by a block-fed device pulled at 4 kHz into a FIFO.",
+      "Starvation returned silence, putting a step to zero into the waveform on every underrun; a converter's output register HOLDS its last conversion, so it now holds."
+    ],
+    "MY_OWN_INSTRUMENT_FAILURES_THIS_SESSION": "FIVE, all the same class - an instrument that could not report the state it was built to detect: a meter that printed only when frames arrived and so said nothing when none did; a starvation counter never printed; a drop counter never printed; a format string that lost its peak arguments; and a build chain where two scripts in one command silently skipped the second while returning exit code 0. Rule reinforced: check the ARTEFACT, never the exit code, and make every instrument able to report absence."
+  },
+  "SAMPLING_SESSION_2026_08_28": {
+    "headline": "The recording works and is wrong in one specific way: the A/D DMA fills a 4096-word ring at $0091B0 and wraps every 92.9 ms, and the firmware's copy-out is not synchronised to that wrap. The audio is spliced on a 4468-sample grid, 9.87 Hz, about 141 samples lost or re-recorded each time.",
+    "MEASURED_FACTS": [
+      "THE BUFFER: ADC-WRAP shows the DMA destination returning to $0091B0 every 4096 words, forty consecutive times with no deviation. One contiguous ring, two bytes per word, at 44100 words/s that is 92.9 ms.",
+      "ONE WORD IS ONE FRAME on this path, measured absolutely with a per-frame counter fed to the DMA instead of the microphone: playback gain 13128/65532 = 0.2003, measured slope 0.8011 units/sample, ratio 4.00 which is exactly the ramp's step. Not inferred from a rate this code imposes.",
+      "THE MACHINE'S OWN SCREEN: RECORD STEREO, tim 1.00s = 88200. Two words per frame collected into one place.",
+      "THE SPLICE GRID: 4468 samples median, identical on both channels, 47 and 46 events in a 5-second capture. About 141 samples missing per splice, median 141.1 left and 141.0 right over 28 events each.",
+      "THE CHANNEL SKEW is a beat, not a new fault: +395 samples in one run, -398 in the next. Same magnitude, opposite sign.",
+      "THE TRANSPORT IS CLEAN END TO END: 150821 consecutive DMA words with no break past 2 ms; plugin ring DROPPED=0, ratio 0.998; ADC FIFO starved=0 with drops only in the second after a recording ends.",
+      "THE RECORDING LENGTH IS CORRECT - Thor's 5-second setting yields 5 seconds of audio. The doubled elapsed time is the WAVEFORM DRAWING, not a starved transfer.",
+      "THE FREEZE NEEDS A SIGNAL: with nothing on the input, RECORD then GO does not freeze and abort works. With a signal the recording runs and is audible through the monitor, but the waveform never draws and abort no longer stops it. The machine itself keeps running - ADC-RATE reports 44100 words/s for twenty more seconds after the panel stops responding."
+    ],
+    "RETRACTED_THIS_SESSION": [
+      "SAMPLING 39's claim that 44100 words/s proved one word per frame. DREQ is only raised when the FIFO holds a frame and the FIFO fills at 44100/s, so that rate is the CEILING THIS CODE IMPOSES. starved=0 is empty for the same reason. The conclusion happened to be right; the reasoning was circular.",
+      "SAMPLING 46's claim that the A/D never reaches terminal count. The attribution required machine().time() to EQUAL the channel-2 DACK timestamp, and am9517a.cpp asserts EOP in STATE_S3 while set_dack() runs in STATE_S2 - they can never be equal, so every EOP was filtered out and the silence was read as absence. end_of_process() only reloads the base address under MODE_AUTOINITIALIZE, and the measured wrap to $0091B0 IS that reload, so the terminal count has been arriving all along.",
+      "SAMPLING 41's reading of the doubled elapsed time as a transfer starved to half rate."
+    ],
+    "MY_INSTRUMENT_FAILURES_THIS_SESSION": "FOUR budget failures of the same class already written down as U508 on the Virus - a budget shared between a bulk writer and a rare event goes to the bulk writer: the gap probe spent 40 lines on my own 4 kHz refill tick in five milliseconds; the wrap probe spent 40 lines on the buffer's opening sweep because the buffer starts inside the window; and twice an attribution predicate silently matched nothing. Plus one instrument that ALTERED the machine: install_write_tap over the whole 24-bit space takes every write off MAME's direct RAM path and was the freeze Thor hit at SAMPLING 46. Corrections that worked: trigger on the SIGNATURE, not on a count, and give the bulk writer no share of the budget.",
+    "NEXT": "The wrap is a terminal count and it reaches nothing of ours - out_eop_cb is wired only to the floppy's TC merger. Find how the firmware is meant to learn the input buffer is full: the EOP itself, an interrupt, or a status bit. The OS runs from RAM so this cannot be read from the ROM image; it has to be measured from running code, same rule as the DSP's P-RAM on the Virus.",
+    "BUILD_RULES_PAID_FOR": [
+      "VSTHost must be EXITED before a link, not merely have the plugin window closed - it holds the DLL and the link fails with LNK1104 while the MAME build reports success.",
+      "Run the two build scripts separately and check the ARTEFACT TIMESTAMP, never the exit code."
+    ]
+  },
+  "SAMPLING_SESSION_2026_08_29": {
+    "status": "Phase one closed: the recording path is DIAGNOSED, not fixed. Audio arrives, the pitch is right, the length is right, and the stored content is wrong in one specific, measured way.",
+    "THE_MACHINE_AS_MEASURED": [
+      "The A/D DMA fills a 4096-word ring at $0091B0. The firmware ARMS IT ITSELF at GO - reg 04/05/06 = B0/91/00, reg 02/03 = FF/0F, reg 0A = 55 - so word mode, into memory, autoinitialise, and the ring starts at zero phase.",
+      "Terminal count fires every 4096 words, 92.9 ms, confirmed by ADC-EOP and ADC-WRAP landing in the same microsecond forty times over. out_eop_cb reaches only the floppy's TC merger, so nothing tells the firmware.",
+      "The firmware tracks the ring by POLLING THE DMA'S CURRENT ADDRESS - registers 04h/05h, 223870 times a second, never the count and never the status.",
+      "Its routine at 0271B0h: out C001h,2 / in ax,C004h / sub ax,91B0h / sub ax,bx / modulo 2000h / jz re-read / sub ax,800h, answer in CF. Every quantity a BYTE offset, which settles the address-increment question from the firmware's own arithmetic: two bytes per word.",
+      "Its caller at 027184h advances a 32-bit value at [7904] (DS=0, so linear 007904h) and loops call-poll / copy / repeat until the difference falls below 800h.",
+      "0270C6h is a plain rep movsw from the ring to 3A60:62AA - no interpolation. And it copies NOTHING during a recording: DX is 0000h, so CX is zero, and a write tap on its destination at linear 408AAh never fired once. That routine walks the ring without storing - most likely the waveform display.",
+      "THE RECORD STORE IS ON DMA CHANNEL 3, into the L7A1045's sample memory. Measured there, in the second the A/D delivered 44100 words: 529200 stored, TWELVE TIMES as many, as an unbroken +1 sequence - 529071 of 529200, zero repeats - with 129 discontinuities, one per 4009 words against a ring of 4096.",
+      "RATE-ADV: the read position advances 2.007 bytes per DMA word - locked. The read side is correct.",
+      "TOUT1 runs at 44199 Hz constantly and gates IC30's outputs, DMRQ2 among them. The DACK is ACTIVE LOW, measured 88189 zeros against 44100 words and 1058411 ones - this driver had it backwards since the channel was first wired, and that is fixed."
+    ],
+    "WHAT_IS_FIXED_AND_KEPT": [
+      "DMA channel 2 wired at all - the original freeze of GitHub issue #2.",
+      "The DACK polarity, settled by arithmetic that admits no other reading.",
+      "One word per frame on this path, measured absolutely with a per-frame counter: playback gain 0.2003, slope 0.8011, ratio exactly 4.00 against a ramp stepping 4."
+    ],
+    "RULED_OUT_BY_MEASUREMENT": [
+      "The A/D transfer cannot be rate-limited. Four builds paced it - from TOUT1, from the converter's clock, and twice from a due time - and all four stopped the machine at RECORD, twice with the input meter blank. It must be free to burst.",
+      "The burst window is not the cause: at 11025 Hz the gap is 68 us instead of 193 and the seams did not move.",
+      "The µPD71071 address-increment analogy: refuted by the firmware's own byte arithmetic.",
+      "The rate-conversion increment: refuted, the copy is a block move.",
+      "The whole-space write tap and the 156453-lines-a-second log: both took the emulation below real time and produced a ten-to-thirty-second waveform draw that I read as a machine defect. Thor caught it by remembering it had been fine."
+    ],
+    "NEXT": "Find why the store on channel 3 writes twelve words for every one the converter delivers. The read side is locked and the ring is correct, so the multiplication happens at or after the store. That is one loop with one exit condition.",
+    "MY_RETRACTIONS_THIS_SESSION": "NINE, and one of those was itself withdrawn. Every one had the same shape: a reading fixed by how the instrument was built rather than by the machine. The rule that would have caught all of them is now first on the list - before believing a measurement, ask WHAT READING WOULD HAVE BEEN IMPOSSIBLE. If none, it is not a measurement."
+  },
+  "SAMPLING_SOLVED_2026_08_29": {
+    "GOLDEN_COMMIT": "mame@2bb825d8 (fix at ecf41001, confirmed at fe077bea) - clean mono recording, verified at the storage point and by ear",
+    "THE_FAULT_IN_ONE_SENTENCE": "The L7A1045's DMA request timer was set to 64 ticks of a 33.8688 MHz clock - 529200 requests a second - where the sample period is 768 ticks, so the sound chip asked the CPU for a word TWELVE times per sample and the machine stored twelve times what the converter delivered.",
+    "THE_FIX": "l7a1045_l6028_dsp_a.cpp, dma_timer: attotime::from_ticks(64, clock()) -> from_ticks(768, clock()). One request per sample period, 44100 a second, which is what the A/D delivers.",
+    "WHY_THE_64_WAS_THERE": "The line's comment read '8x the sample period'. That eight is the OUTPUT OVERSAMPLING of the D/A - the S3200 block diagram shows it as IC12, 'OVER SAMPLING (8X) DIGITAL FILTER (20BIT)', feeding two 20-bit DACs. A property of the playback path used to pace an INPUT transfer, and it did not even match its own comment: 8x would be 96 ticks, the code asked for 64. Thor identified the eight.",
+    "PROOF": [
+      "before: SAMPLE-STORE 529200 words/s, step+1 100%, 129 jumps - one per lap of the 4096-word ring",
+      "after:  SAMPLE-STORE 44100 words/s, step+1 44100 (100.0%), repeat 0, jump 0, worst 0",
+      "DSP-DREQ3 rose 44100 times against 44099 words stored - one word per request, the DMA controller was always faultless",
+      "the panel now draws a regular waveform and the captured audio is clean by ear"
+    ],
+    "EVERY_SYMPTOM_CAME_FROM_THAT_ONE_INTEGER": "the 4468-sample splice grid, the seams one ring long, the repeated content, the copy loop at 0271A3 whose exit condition could never be reached, and the freeze.",
+    "WHAT_MADE_IT_FINDABLE": "A per-frame counter fed to the converter instead of audio. It was the only instrument in the session whose reading could not be shaped by how it was built - an absolute value carried through the machine's own memory - and it is what turned the fault from a symptom into an exact integer. Measuring at the STORAGE POINT rather than at the loudspeaker mattered just as much: the output path removes a slow ramp as DC, which invalidated four rounds of coverage figures.",
+    "KNOWN_COST": "The same timer paces sample LOADING, now twelve times slower. Speed, not correctness. If intolerable, make the rate depend on what the transfer is for.",
+    "STILL_OPEN": [
+      "stereo - the machine wants two words per frame there, a separate question",
+      "REC GAIN and REC VOLUME - SW1 and VR1 ahead of the 64fs delta-sigma ADC on the block diagram, not modelled at all",
+      "the freeze under load and long recordings, to be re-tested now that the store is clean",
+      "loading and exporting Akai programs with samples from local disk - Thor's next idea, deferred"
+    ]
+  },
+  "SAMPLING_STATE_2026_08_29_EVENING": {
+    "headline": "TWO SEPARATE FAULTS, both located. The RECORDING ITSELF IS CORRECT - measured. The MEMORY CORRUPTION is a firmware copy loop that never exits, and it was present in every build including the one called golden.",
+    "FAULT_1_RATE_SOLVED": {
+      "what": "l7a1045_l6028_dsp_a.cpp's DMA request timer used from_ticks(64, clock()) = 529200/s where the sample period is 768 ticks, so the chip asked twelve times per sample and the machine stored twelve times what arrived.",
+      "fix": "from_ticks(768, clock()) -> 44100/s.",
+      "proof": "SAMPLE-STORE 44100 words, step+1 100.0%, repeat 0, jump 0. DMA-DST 44100 words, contiguous 44099 (100.0%), jumps 0, span 88198 bytes = 44099 x 2. The firmware's aim is perfect.",
+      "the_8x": "The old comment said '8x the sample period'. That eight is the OUTPUT oversampling of the D/A - S3200 block diagram IC12, 'OVER SAMPLING (8X) DIGITAL FILTER (20BIT)' feeding two 20-bit DACs. Thor identified it. A playback property used to pace an input transfer.",
+      "cost": "Sample LOADING is paced by the same timer and is now twelve times slower. Also the MONITOR goes silent during recording in this build, where it sounded in about nine of ten earlier ones - so the monitor travels the same DMA and 768 is right for the recording but wrong for the device as a whole."
+    },
+    "FAULT_2_MEMORY_CORRUPTION_OPEN": {
+      "what": "The transfer never ends. For a ONE SECOND recording the destination marches through sample memory - 032710, 047F96, 0563EA, 020000, 035888, 04B7F8, 061080, 076908, 08C190, 0A1A18, 0B72A0 - roughly 600 KB in ten seconds, paving every sample already loaded. That is why the built-in waveforms turn sawtooth-like: they sit at fixed addresses.",
+      "not_the_dma": "mode 49h has bit 4 clear, so NO autoinitialise, and end_of_process() masks the channel. count reaching FFFFFFFFh is only the post-decrement remainder after termination. The controller behaves.",
+      "it_is_the_firmware_loop": "The firmware RE-ARMS channel 3 block after block - source 0091B0h, count 07FFh, 2048 words, 800h bytes, exactly the block size in its own routine at 0271A3h - and far more often than the ~21 arms a one-second recording needs. 803 register writes in one run.",
+      "why_it_cannot_exit": "The loop exits when avail falls below 800h. avail is the A/D ring pointer minus BX, and BX is NOT updated inside the loop, so in this model it can only grow. The firmware is scripture and exits on real hardware, so something that moves on the board does not move here.",
+      "present_in_golden": "Thor confirms the corruption was there in mame@2bb825d8 too. It is independent of the twelve, and the SAMPLING 91 prediction that the correct rate would clear it is withdrawn."
+    },
+    "RULED_OUT_BY_MEASUREMENT": [
+      "The destination pointer is NOT wrong - 100 per cent contiguous, zero jumps. The shared-voice-pointer suspicion of SAMPLING 90 is finished, and that change crashed the machine on start: Thor corrected both its premises - during a recording only the MONITOR sounds, and the recording always goes to the SELECTED SAMPLE's location, so voice 0's start is the intended destination, not a collision.",
+      "The DMA request line cannot be paced from our side. Three attempts - SAMPLING 57 from TOUT1, 60/61/68 from a clock and a due time on channel 2, and 91 on channel 3 - and every one degraded the machine: crashes, blank input meter, a late monitor, a capture falling out of time. THE REQUEST IS NOT A KNOB."
+    ],
+    "NEXT": "DMA3-ARM prints BX, the A/D ring offset and the resulting avail at every arm. If avail falls arm by arm the loop converges and the trouble is elsewhere; if it is flat or rising, this is the runaway and the question becomes what should have moved.",
+    "BUILDS": {
+      "golden_recording": "mame@2bb825d8 - clean recording, slow loading, silent monitor, corruption present",
+      "current": "mame@362c6d00 plus the DMA3-ARM probe, bundle 19:49:49"
+    }
+  },
+  "GOLDEN_V2_2026_08_29": {
+    "commit": "mame@8f644f20 - recording clean AND memory intact. Confirmed by Thor: the built-in samples survive a recording.",
+    "two_fixes": [
+      "SAMPLING 87: l7a1045 DMA request timer from_ticks(64) -> from_ticks(768). 64 ticks of 33.8688 MHz is 529200 requests a second where the sample period is 768 ticks, so the chip asked twelve times per sample and the machine stored twelve times what arrived. The '8x' in the old comment is the OUTPUT oversampling of the D/A (S3200 block diagram IC12), a playback property used to pace an input transfer.",
+      "SAMPLING 97: the DMA destination now WRAPS within the voice's start..end instead of incrementing for ever. The firmware arms channel 3 with mode 59h - autoinitialise - and the A/D ring as source, which is correct; the destination was the half that never started over. Unbounded, it swept from 020002h to 10212ACh - seventeen megabytes - paving every sample in memory."
+    ],
+    "evidence": [
+      "SAMPLE-STORE 44100 words: step+1 100.0%, repeat 0, jump 0",
+      "DMA-DST 44100 words: contiguous 44099 (100.0%), jumps 0, span 88198 bytes = 44099 x 2",
+      "Thor's fifty-sample program: before the fix the samples NEAREST the recording were damaged in order, with the recorded audio duplicated into them, while the rest survived - a transfer overrunning its region into its neighbours. After: built-in samples intact."
+    ],
+    "RULE_LEARNED_SIX_TIMES": "THE DMA REQUEST LINE IS NOT SOMETHING TO PACE OR WITHHOLD. SAMPLING 57 paced it from TOUT1, 60/61/68 from a clock and a due time on channel 2, 91 on channel 3, and 96 refused it at the end of a region - every one of them crashed, froze or degraded the machine. A bound belongs on the ADDRESS, where nothing can stall on it.",
+    "STILL_OPEN": [
+      "THE MONITOR does not pass the input through during recording even with Mon enabled. It sounded in about nine of ten earlier builds, all of which had the 64-tick timer, so it is bound up with that rate. Next question, to be measured not guessed.",
+      "Sample LOADING is twelve times slower, paced by the same timer. Speed, not correctness. Not yet re-tested with a large program from the hard disk.",
+      "STEREO - the machine wants two words per frame there.",
+      "REC GAIN and REC VOLUME - SW1 and VR1 ahead of the 64fs delta-sigma ADC on the block diagram, not modelled at all. Thor's requirement: at default gain the capture must be 1:1 in dB with the input."
+    ]
+  },
+  "GOLDEN_V3_2026_08_29": {
+    "commit": "mame@e5ff299f - recording clean, memory intact, confirmed by Thor. Supersedes GOLDEN_V2 (8f644f20), which had the same wrap but no evidence for it.",
+    "THREE_FIXES": [
+      "SAMPLING 87 - the L7A1045 DMA request timer: from_ticks(64, clock()) -> from_ticks(768, clock()). 64 ticks of 33.8688 MHz is 529200 requests a second where the sample period is 768, so the chip asked twelve times per sample and the machine stored twelve times what arrived. The '8x' in the old comment is the OUTPUT oversampling of the D/A (S3200 block diagram IC12), a playback property used to pace an input transfer.",
+      "SAMPLING 52 - the channel-2 DACK is ACTIVE LOW. Measured 88189 zeros against 44100 A/D words and 1058411 ones; the handler had tested state==1 since the channel was first wired, cancelling the request more than a million times a second while other channels held the bus.",
+      "SAMPLING 105 - the sound chip's DMA WRITE POINTER WRAPS at the end of its region. Measured: 44100 words a second into a region of 128 words, 99.7 per cent past its end, overrunning by 43973 words - 88 KB written beyond a 256-byte buffer. The real destination overran by 28 per cent as well."
+    ],
+    "WHY_WRAP_AND_NOT_STOP": "SAMPLING 96 stopped the transfer at the region end and FROZE the machine, because a request the firmware is waiting on must never be withheld. Wrapping cannot stall - the word is always taken, only its address stays inside the region the firmware itself programmed. This is the sixth time that lesson was paid for: 57, 60, 61, 68, 91, 96.",
+    "HONEST_NOTE": "SAMPLING 97 made this same change and was reverted as a hack, correctly, because there was no evidence for it. It is back only because REGION-FIT measured the overrun. The instinct was not the argument.",
+    "STILL_OPEN": [
+      "THE MONITOR does not pass the input through during recording. Channel 31 is keyed at 020AD0h while the transfer writes 010000h..010080h, so they do not meet. Why it sounded in older builds is unresolved - the honest possibility is that the marching write reached the voice by accident, which would mean the monitor was never modelled at all.",
+      "Sample LOADING is twelve times slower, paced by the same 768-tick timer. Speed, not correctness.",
+      "STEREO - the machine wants two words per frame there.",
+      "REC GAIN and REC VOLUME are not modelled, so the capture is about 12 dB quieter than the input. Handed to Hermes as a task: 'F:/MIZU/COMM A2A channel/Claude to Hermes - S3000XL AK5339 input frontend.md'.",
+      "Diagnostics still live in the tree and must be gated before a public release: SAMPLE-STORE, DSP-DREQ3, RATE-ADV, TOUT1, REGION-FIT, VOICE0-START, DMA-START, VOICE-KEYON, and DMA3-ARM in am9517a.cpp, which is SHARED MAME code."
+    ]
+  },
+  "STEREO_SELECTOR_FOUND_2026_08_30": {
+    "commit": "mame@281fc619",
+    "what": "$00C0 bit 4 is the MONO/STEREO selector; bit 3 is the record strobe. Found by differencing an I/O change log across one mono and one stereo recording in the same run, not by reading the ROM.",
+    "series": {
+      "idle": "A2",
+      "armed": "82",
+      "GO mono": "8A",
+      "GO stereo": "9A",
+      "stop": "A2"
+    },
+    "port": "$00c0-$00c7 is the i8255 m_wadcs; $C0 is port A",
+    "bit3": "record strobe - brackets ADC-EOP activity exactly (8.666-11.900 mono, 18.140-22.902 stereo), so confirmed independently",
+    "bit4": "STEREO - the only structural difference between the two recordings. The other differing port, $88, is inside 0x0080-0x008f = the L7A1045 sound chip, not the input.",
+    "retracted": "SAMPLING 27's LEFT-DMA/RIGHT-DMA reading of bits 1 and 2. Bit 1 is set in EVERY value the firmware writes to $C0 and bit 2 in none. Thor falsified it from the machine's display; this replaces it.",
+    "ceiling_was_ours": "Both recordings measured 44100 words/s, but the DMA request is raised only while fill()>0 and the FIFO fills at 44100 frames/s, so 44100 is the ceiling this code imposes. SAMPLING 39 called the one-word-per-frame handshake self-checking on the grounds that a machine wanting two would starve the FIFO - pop() HOLDS on starvation instead of reporting, so the starvation is silent. Same class as the S3000XL SAMPLING 39 rule, committed in the function that rule was written in.",
+    "uncapped_evidence": [
+      "the machine's own screen: STEREO tim 1.00s = 88200 (SAMPLING 47)",
+      "the single contiguous buffer at $0091B0 measured by ADC-WRAP",
+      "the manual: STEREO records BOTH channels, appends -L and -R; LEFT/RIGHT only chooses the trigger channel"
+    ],
+    "fix": "stereo offers two words per frame - a frame is popped on its LEFT word, the RIGHT word comes from the same frame. Mono is byte-for-byte unchanged. The request line is still never paced or withheld.",
+    "difference_from_SAMPLING_38": "38 alternated L/R WITHOUT doubling the offer rate, so two transfers consumed two frames and the pitch halved. Here the offer rate doubles with the alternation.",
+    "falsifier": "if the machine only wants one word per frame, the second word is never collected, the FIFO backs up, and ADC-GAP / fill() will show it - an observation this construction cannot force.",
+    "also_measured": "both recordings produced a sample region of exactly 0xA550 = 42320 words: mono 02B750..035CA0, stereo 0363A0..0408F0",
+    "build": "MSBUILD_EXIT=0, VST3_EXIT=0, bundle 04:04:28",
+    "status": "KEPT AS KNOWLEDGE ONLY - the behaviour built on it was reverted in SAMPLING 114.",
+    "thor_correction": "The 88200 on the machine's screen is BYTES of memory for a one-second sample, not words per second - it doubles at 2 s. My 'uncapped evidence' misread it. The evidence for two words per frame is the 88200 words/s the machine actually collected once the ceiling came off, not that display."
+  },
+  "INSTRUMENT_BUDGET_2026_08_30": {
+    "commit": "mame@c2245257",
+    "note": "EIGHTH budget in this project spent by something other than the event it was meant to catch. SAMPLING 109's per-port allowance of 8 changes was consumed by the BOOT (t<7) while the recordings happen at t~20. Per-port was right and still not enough: the noise is EARLIER, not merely more frequent.",
+    "rule": "Do not ration, TRIGGER. SAMPLING 110 refreshes every port's allowance on a write to $C0 - the arming latch - so each recording starts with a clean allowance and the boot cannot take it. This is what worked on the Virus at U533."
+  },
+  "STORE_CEILING_2026_08_30": {
+    "commit": "mame@e23a7caa",
+    "measured": "DSP-DREQ3 rose EXACTLY 44100 times/s in mono AND in stereo; SAMPLE-STORE 44100 words/s against 88200 arriving. Half of every stereo recording could never reach sample memory.",
+    "cause": "33868800/768 - the L7A1045 DMA request period set in SAMPLING 87. That fix was right about the 12x and wrong to express it as a FRAME period: the transfer moves WORDS and a stereo frame is two of them.",
+    "rule_violated": "THE DMA REQUEST LINE MUST NEVER BE PACED - paid for six times on the A/D channel, left standing on channel 3. A paced request line can only report its own pacing back.",
+    "fix": "l7a1045 gains m_dma_words_per_frame, DEFAULT 1 so every other driver is bit-for-bit unchanged; the S3000XL sets it from $00C0 bit 4. A running transfer is re-armed.",
+    "not_a_defect": "SAMPLE-STORE repeat 22039 / jump 22061 in stereo. That probe differences VALUES, not addresses; with a correlated source the two words of a frame are equal, so alternating repeat/jump is what correct stereo interleaving of a mono-ish input looks like.",
+    "falsifier": "if stereo still clicks with the store rate doubled, the ceiling was not here and SAMPLING 111 and 112 both come back out. Mono cannot be affected - the mode bit is clear and the period stays 768 ticks.",
+    "build": "MSBUILD_EXIT=0, VST3_EXIT=0, bundle 04:19:16",
+    "status": "REVERTED in SAMPLING 114 - it removed the clicks and left the recording an octave low, which is worse than the clean one-sided stereo it replaced."
+  },
+  "REVERT_2026_08_30": {
+    "commit": "mame@a33c4199",
+    "judged_on": "what Thor hears, which outranks every log in this session",
+    "before_111": "stereo CLEAN and one-sided; mono good",
+    "with_111": "stereo clicks, barely audible (store still capped at 44100)",
+    "with_111_112": "stereo an octave or two low, no clicks (store doubled to 88200)",
+    "kept": "$00C0 bit 4 = stereo, bit 3 = record strobe, measured by differencing two recordings. INCTL and ADC-RATE report them. l7a1045 keeps m_dma_words_per_frame default 1, driver passes 1 unconditionally.",
+    "dropped": "two words per frame on the A/D; the doubled L7A1045 request rate.",
+    "thor_constraint": "The sampling frequency is 44.1 kHz and nothing in this machine runs at 88.2. A stereo pair cannot be two transfers per frame on this path - the second channel reaches its sample some other way.",
+    "next_question": "WHERE the words go: the firmware's own de-interleave into the -L and -R samples. NOT another rate experiment.",
+    "my_failure_mode_this_session": "Three rounds spent arguing about rates, each supported by a log that was reading a ceiling I had put there myself. Twice the result was a worse recording. The rule about instruments whose reading is fixed by their own construction was quoted correctly and then violated in the very next build."
+  },
+  "STEREO_IS_A_WHERE_2026_08_30": {
+    "found_in": "run_114.log, from probes that already existed - no new code",
+    "signature": "src 00A1B0 appears EXACTLY ONCE in the whole run: immediately after the stereo recording, paired with src 0091B0, both count 07FF, into two different destinations - voice0 start 020400 and voice0 start 02B050. After the MONO recording there is no such pair at all.",
+    "arithmetic": {
+      "00A1B0 - 0091B0": "0x1000 = exactly half the 0x2000 A/D ring",
+      "02B050 - 020400": "0xAC50 ~= 44100 words = two consecutive one-second samples, the -L and the -R"
+    },
+    "conclusion": "The firmware reads the A/D buffer as TWO HALVES, one per channel, and ends a stereo recording by copying each half into its own sample. Our A/D fills the ring as ONE linear stream with one channel, so the upper half holds the left channel's later audio instead of the right channel. That is the one-sidedness and it is a WHERE, not a rate.",
+    "constraint_untouched": "Still one word per frame at 44.1 kHz - Thor's constraint is not in question. The open question is which HALF a word lands in, which on the board is the PAL driving an address bit from ADLR (the LDMA/RDMA pair in the block diagram).",
+    "next_single_question": "During the recording, how many distinct destinations does the machine write to? Two means the model needs the half-select on the A/D destination and nothing else.",
+    "caution": "During the recording channel 3 is armed ONCE, mode 59 (autoinit), src 0091B0 count 0FFF, with voice0 start 010000 end 010080 - a 128-word region, i.e. the MONITOR. So the path by which a second of audio reaches sample memory is NOT that transfer, and has not been identified yet. Do not assume it.",
+    "status": "MEASURED, NOTHING BUILT ON IT YET",
+    "run_115_result": "THE WRAP IS INNOCENT. wraps 51 (mono) and 175 (stereo) over ~40000 words during the recordings; the 344/s figures belong to the 128-word monitor window only.",
+    "recording_region": "During a recording voice0 is a 44112-word region - exactly one second - and it is THE SAME SIZE in mono and stereo. Mono used 020B00..02B750, stereo used the adjacent block 02B750..0363A0.",
+    "the_fault": "In stereo only ONE such region is written. The two post-recording transfers measured in run_114 went to two ADJACENT regions (020400 and 02B050, 0xAC50 = 44112 words apart) from the two halves of the A/D ring (0091B0 and 00A1B0). The upper half is where the right channel must be, and our A/D never puts anything there, so the -R sample stays empty.",
+    "retro_explains": "SAMPLING 111 was the right half of the idea - the machine took every word offered, L=R, no starvation. SAMPLING 112 was the wrong half: it doubled the L7A1045 request rate GLOBALLY, which is what broke the sample-length arithmetic and produced the octave. Sample rate stays 44.1 kHz throughout; 88200 is words per second on the bus, not hertz.",
+    "next_step_candidates": [
+      "restore 111 alone (two words per frame in stereo), WITHOUT 112",
+      "make the A/D destination place left words at 0091B0+n and right words at 00A1B0+n - the split the firmware's own two copies imply"
+    ],
+    "unsettled": "How the board produces that split. 00A1B0 - 0091B0 = 0x1000, so it is base + half, but 0x91B0 already has bit 12 set, so it is not a simple A12 force from this base. Not needed for the model - what matters is the outcome the firmware reads."
+  },
+  "AD_CHANNEL_IS_MODE_INDEPENDENT_2026_08_30": {
+    "commit": "mame@e2ecd86d (probe), measured in run_116",
+    "measured": "DMA channel 2 - the A/D - is armed EXACTLY ONCE per recording, always mode 55, addr 0091B0, count 0FFF (4096 words, autoinitialise), and IDENTICALLY in mono and stereo. There is no second arm at 00A1B0.",
+    "falsified": "The prosaic hypothesis that the firmware arms channel 2 twice in stereo, once per ring half. It does not.",
+    "conclusion": "The A/D transfer is MODE-INDEPENDENT. The machine asks for the same single linear transfer in both modes; the only difference between the modes anywhere is $00C0 bit 4. So the machine expects the CONVERTER to put the right channel into the stream - the transfer will not ask differently.",
+    "already_excluded": "L,R,L,R interleaving: measured in SAMPLING 111/112, the machine put the pair into ONE 44112-word region and played it as mono - the octave down.",
+    "gap_this_closed": "Every arm probe in this project logged channel 3. The A/D's own arming had never been observed, so every 'the firmware arms it once' statement in the record was about channel 3 only.",
+    "next_single_question": "What reads the ring during a stereo recording, and with what stride. A firmware question, measurable only from running code - the OS runs from RAM.",
+    "status": "MEASURED, NOTHING BUILT ON IT"
+  },
+  "STEREO_IS_A_REGRESSION_2026_08_30": {
+    "the_question_I_should_have_asked_first": "Thor: 'a project eletenek 90%-aban az elejetol out of box ment mindket oldal.' If it once worked, it is a REGRESSION and the method is to find the commit, not to investigate the firmware. Hours were spent on the wrong method.",
+    "history_from_git": {
+      "c86c424e SAMPLING 5": "ADLR modelled as strict left/right alternation on successive DMA reads - BOTH channels delivered",
+      "c1cc0b17 SAMPLING 10": "alternation anchored to the frame so it cannot drift",
+      "be82beb0 SAMPLING 21": "one request per WORD instead of per frame",
+      "01be8864 SAMPLING 22": "phase advances only on words actually handed over",
+      "6e0ed408 SAMPLING 24 / b9a5590a SAMPLING 25": "left word offered when the FIFO holds a frame, right word always offered - it completes a pair already popped",
+      "2c507f47 SAMPLING 39": "THE REGRESSION - 'the pair alternation is reverted'. From here on only the left word is ever handed over."
+    },
+    "what_SAMPLING_39_was_based_on": "Thor's sine3.wav capture: every sample delivered twice, in fixed phase, the pitch exactly halved - an OCTAVE DOWN. It was read as 'the machine takes one word per frame while the producer hands out two' and the right channel was deleted.",
+    "the_real_reading": "The octave down is what happens when the L,R pair lands in ONE 44112-word region and is played as mono. SAMPLING 39 did not fix the octave, it HID it by removing the right channel. The octave is the original, never-fixed defect - and it is exactly what came back today with SAMPLING 111/112 when the right channel was handed over again.",
+    "why_nothing_converged_tonight": "We were re-deriving the decision made in SAMPLING 39 without knowing it. The fault was behind us, not in front of us.",
+    "also_relevant": "SAMPLING 87's 768-tick timer caps the store at exactly 44100 words/s - enough for mono, exactly half of stereo. That cap did not exist when the alternation worked.",
+    "two_options": {
+      "A": "revert SAMPLING 39 (one line, gated on $00C0 bit 4 so mono cannot be affected) - stereo sounds on BOTH sides but an octave low until the split is fixed",
+      "B": "leave it (mono good, stereo one-sided) and fix the split first - the 00A1B0 question"
+    },
+    "status": "MEASURED FROM GIT, AWAITING THOR'S CHOICE"
+  },
+  "INPUT_PATH_IS_PROVEN_GOOD_2026_08_30": {
+    "measured": "With a stereo signal on the input: SAMPLER-IN PEAK-L=100.0% PEAK-R=100.0%, and ADC-PEAK LEFT 32766 (100.0%) RIGHT 32766 (100.0%).",
+    "falsified": "Thor's hypothesis that MAME treats the input as a mono microphone, and his FL/FR objection. Both channels reach s3000_adc_device at full scale; the mapping works.",
+    "also": "This is the first time the project's 'the input is 1:1 and correct' claim actually covers BOTH channels - until SAMPLING 121 both meters took max(|L|,|R|), so the claim only ever covered the louder side.",
+    "the_single_remaining_gap": "adc_dma_r() hands over m_adc_l and nothing else. That is why the monitor has no right side during recording: the machine never receives a right word. One line.",
+    "context": "Correct as Thor states it: upstream MAME's s3000 driver has NO input ADC at all - s3000_adc_device, the MICROPHONE wiring and the whole record path are ours. Any mapping fault here would be ours, not upstream.",
+    "open_contradiction": "SAMPLING 119 handed the right word over and Thor reported that MONO went an octave down - but the log of that same run reads 'ADC-RATE 44100 words/s MONO L=704048 R=0', i.e. mono received one word per frame and zero right words, byte-for-byte the old path. Mono could not have been changed by it. Unresolved, and it needs a careful retest rather than an explanation.",
+    "status": "MEASURED"
+  },
+  "TWO_WORDS_PER_FRAME_IS_CLOSED_2026_08_30": {
+    "verdict": "CLOSED BY MEASUREMENT. Handing the right word over does NOT produce a right channel - it produces an octave and memory corruption, with the stereo recording still left-only. SAMPLING 39's decision was CORRECT: this machine does not want two words per frame, in any mode.",
+    "why_this_is_now_decisive": "The input path was proven good first (SAMPLING 121/122): with a stereo signal in, SAMPLER-IN PEAK-L=100.0% PEAK-R=100.0% and ADC-PEAK LEFT 32766 RIGHT 32766. So the right channel DOES reach the converter. It was handed over and the machine still recorded left only. The failure is no longer 'we never gave it' - we gave it, and it is not what the machine wants.",
+    "tried_and_reverted_tonight": [
+      "SAMPLING 111 - two words per frame, store capped: clicks, barely audible, one-sided",
+      "SAMPLING 112 - plus the store rate doubled globally: octave down",
+      "SAMPLING 119 - alternation alone, nothing else: Thor reported mono octave (log said mono was untouched, R=0)",
+      "SAMPLING 122 - alternation plus store headroom scoped to the strobe edges: still left-only, octave on stereo, corruption"
+    ],
+    "do_not_reopen": "Any variant of 'deliver two words per frame'. Four builds, four failures, and the input path is proven good in between - the hypothesis has had every chance.",
+    "what_is_left": "The stereo difference is downstream of the converter and is NOT a word-rate or word-ordering question. $00C0 bit 4 is the only mode difference anywhere, the A/D transfer is mode-independent, and 00A1B0 - the second ring-half source - appears only after a stereo recording. That triple is the whole remaining surface.",
+    "mono_status": "Good. The gating held: with bit 4 clear the stereo branch is unreachable. A single small click near the start of a mono recording is present but Thor is not sure it is new.",
+    "status": "REVERTED to mame@8db724e4, bundle 07:28:18"
+  },
+  "THOR_OBSERVATIONS_2026_08_30": {
+    "monitor_needs_one_stereo_recording": "THE STRONGEST OPEN CLUE. The monitor is silent until ONE stereo recording has been made; from then on it is audible in MONO recordings too. So a stereo recording SETS SOMETHING UP that persists, and the mono path never sets it up on its own. This is not a rate or an ordering question and it is not explained by anything found so far.",
+    "waveform_draw_timing": "In MONO the waveform drawing is exactly in sync with the recording length. In STEREO the drawing runs slightly LONGER than the actual recording.",
+    "mono_click": "A single small click near the start of a mono recording. The mono audio path is functionally IDENTICAL to golden v3 (mame@e5ff299f) - verified by diff: everything since is logging, plus m_dma_words_per_frame whose default of 1 gives the same 768-tick timer. So restoring v3 would not remove it, and the leading suspect is instrumentation cost: the iocfg write tap called machine().time() on every I/O write below 0x100, and the adcread read tap took pc() on every read across 8 KB of hot RAM during a recording. Both switched off in SAMPLING 123.",
+    "precedent": "Thor caught this class once before - the waveform drawing had been the right speed a few commits earlier and my logging was what slowed it.",
+    "mono_click_RESOLVED": "CONFIRMED FIXED by SAMPLING 123 (mame@8570d4cb, bundle 07:50:06). Thor: the mono recording is now flawless. So the click was the TIME COST of my own probes - the iocfg write tap calling machine().time() on every I/O write below 0x100, and the adcread read tap taking pc() on every read across 8 KB of hot RAM during a recording - and not anything in the model. The mono path had been functionally identical to golden v3 throughout.",
+    "rule": "AN INSTRUMENT ON AN ALWAYS-RUNNING PATH IS ITSELF AN INTERVENTION. Third time in this project: the Virus execute_run() time calls, the waveform-draw slowdown Thor caught, and now this click. Diagnostics that sit on a per-access path must be compile-time gated by default, not left on."
+  },
+  "CONTROL_BIT3_IS_THE_STEREO_BIT_2026_08_30": {
+    "measured": "run_125, one run containing mono, stereo, mono in that order, logging EVERY control-word write to the L7A1045: MONO writes CTRL 0150 and STEREO writes CTRL 0158, to the same channels 16 and 23, with every other bit identical. One bit: 0x08, bit 3.",
+    "windows": {
+      "MONO 67.1-97.1": "CTRL 0150 ch16 x3, 0150 ch23 x3, 0080 ch23 x3, 0000 ch31 x4",
+      "STEREO 106.0-107.0": "CTRL 0158 ch16 x3, 0158 ch23 x3, 0080 ch23 x3, 0000 ch31 x4",
+      "MONO 116.1-118.3": "CTRL 0150 again - the bit is NOT persistent"
+    },
+    "the_gap": "Bit 3 is UNMODELLED. The device knows only CONTROL_DMA_START (6) and CONTROL_KEY_ON (8); bit 3 is one of the '?' bits in the register-4 documentation. So the machine states something about the transfer and we silently drop it - the class of defect this project already named: an unmodelled register is not neutral.",
+    "what_it_is_not": "Not the stereo-pair heuristic added for the MPC3000: that triggers on complementary hard-panned volumes and pairs ch with ch^2, but here the pair is 16 and 23, which is not a ^2 pair, and the firmware issues its own key-on for each. The heuristic does not fire on this machine.",
+    "what_it_does_not_explain_yet": "The monitor becoming audible after one stereo recording and STAYING audible. Bit 3 is not persistent - the later mono recordings write 0150 again - so whatever persists is something else that the stereo pass leaves behind.",
+    "leading_hypothesis": "Bit 3 tells the chip the DMA transfer it is about to service is STEREO, i.e. the chip itself de-interleaves the incoming stream across the two voices. That would be the missing piece, and it sits exactly where every measurement has been pointing: downstream of the converter, on the sound chip, not in the word rate or the word order.",
+    "status": "MEASURED. Nothing modelled on it yet.",
+    "tested_and_reverted": "SAMPLING 126 read bit 3 as 'split the DMA words across two destinations, voice 0 and voice 1'. THE PLUGIN FROZE. Reverted (mame@6bb3378c). So voice 1's pointer is not a valid second destination - writing there stops the machine - and bit 3 does NOT mean that.",
+    "what_survives": "The measurement itself: mono writes CTRL 0150 and stereo writes CTRL 0158, same channels, one bit apart, and bit 3 is unmodelled. That stands. Only the meaning I attached to it was wrong.",
+    "next_reading_to_consider": "Bit 3 is written together with KEY_ON (0x0158 = key_on | dma_start | bit4 | bit3) and it goes to BOTH voices of the pair, ch16 and ch23. So it may be a PER-VOICE flag meaning 'this voice is one half of a stereo pair' - a playback property - rather than anything about the DMA transfer. Not tested, and not to be built on without evidence.",
+    "cost_so_far": "Five builds have now tried to make stereo work by changing what we send or where it goes - 111, 112, 119, 122, 126 - and all five were reverted. Mono has survived every one of them intact, which is the one thing the gating has reliably delivered."
+  },
+  "R_REGION_IS_FED_BUT_ONLY_ONE_BLOCK_2026_08_30": {
+    "question": "Does the -R sample region ever receive anything at all during a stereo recording? Never asked before.",
+    "measured_run_127": {
+      "MONO 45.60-46.70 (1.1 s)": "dest 020C00 words 47968  - the whole recording, 1.1 s x 44100",
+      "STEREO 73.40-75.50 (2.1 s)": "dest 02B850 words 92054 - the whole recording, 2.1 s x 44100; dest 02B050 words 2048; and dest 020400 words 2048 at the start of the stereo window",
+      "monitor": "dest 010000 in both - the 128-word window, wrapping"
+    },
+    "answer": "IT IS FED, BUT ONLY 2048 WORDS - exactly one block, which is the count 07FF transfers seen since SAMPLING 115. About 46 ms out of a one-to-two second recording. So the 'never even tries' branch is CLOSED.",
+    "reading": "The firmware copies from a ring half while enough data is available there and stops when it is not - the avail >= 0x800 test in its own loop. Our A/D fills the ring linearly with left words only, so the UPPER half never accumulates anything new and the copy stops after a single block. That is consistent with the upper half being the right channel's place, which is where the two end-of-recording sources 0091B0 and 00A1B0 already pointed.",
+    "what_it_does_not_settle": "How the hardware gets the right channel into the upper half. One arm of DMA channel 2 at 0091B0, mode-independent, is all the firmware does - measured in SAMPLING 116. Delivering the pair interleaved has been tried four times and fails.",
+    "status": "MEASURED, nothing built on it"
+  },
+  "RING_IS_ONE_LINEAR_BUFFER_2026_08_30": {
+    "tested": "SAMPLING 128 placed the right word into the ring's upper half at the same relative position as the left, leaving the left path byte-for-byte untouched. Thor: the right channel is still only the spike. Reverted (mame@f735184e).",
+    "what_it_falsifies": "THE WHOLE 'two halves = two channels' READING, mine, built over several rounds. The firmware's own position routine at 0271B0 reads the DMA current address, subtracts 0x91B0, and takes it MODULO 0x2000 - it treats the ring as ONE linear 8192-byte buffer. 0091B0 and 00A1B0 are two BLOCK BOUNDARIES inside it, not two channel areas.",
+    "why_00A1B0_only_appears_in_stereo": "Not because it is the right channel's home. Because a stereo recording has MORE DATA PENDING at the end, so the closing flush spans two 2048-word blocks instead of one. Quantity, not channel. This also explains the single 2048-word block the -R region receives, which Thor hears as one transient spike.",
+    "consequence": "The stereo difference is NOT in the ring. It is not in the word rate, the word order, the destination half, or the voice split - all tested and reverted. What is left are the two FLAGS: $00C0 bit 4 and the L7A1045 control bit 3, both measured, both unmodelled.",
+    "module_maturity_check": "Thor's method: upd71071/v5x_dmau is used by fmtowns, apxen, s900, future32 and an Acorn podule - broadly exercised, so unlikely to hold a fault of ours, and everything we put there is logging. The l7a1045 is used only by mpc2000, mpc3000, s3000 and SNK Hyper NeoGeo 64, and the HNG64 loads samples without ever recording - so this chip's DMA-IN path is exercised by nobody but us. Consistent with SAMPLING 87 finding a real upstream defect exactly there.",
+    "status": "REVERTED. Six attempts now: 111, 112, 119, 122, 126, 128."
+  },
+  "THE_PAIR_PARTNER_IS_SILENT_2026_08_30": {
+    "measured_run_129": "Every voice keyed during a stereo recording, with the firmware's own mixer numbers: ch16 L=00 R=00, ch23 L=00 R=80, ch29 L=00 R=7D. NOT ONE VOICE IN THE WHOLE RUN HAS ANY LEFT VOLUME.",
+    "consequence_1": "The one-sided MONITOR is not evidence about the input. The monitor is a SINGLE voice with L=00, so it is one-sided by construction whatever it contains. That argument is what steered the search upstream to the A/D and the ring, and it does not hold. It could have been checked with one read-only probe at any point.",
+    "consequence_2": "A concrete defect, and it is on the MIXING side, which has never been looked at: ch16 - the partner that should carry the other half of the pair - is keyed with BOTH volumes at zero. A voice that is started and can never be heard. ch23 sounds, ch16 does not. That is the one-sidedness.",
+    "where_to_look": "The mixer parameters come from m_regs[L6028_Mixer_Params][ch], which the firmware writes. Either it writes ch16's AFTER the key-on, or it writes them somewhere we are not reading. Envelopes are moving on both voices (ch16 env 3FFF -> 0000, ch23 3FFF -> 0013 -> 3009), so the voices are alive; only the panning is missing.",
+    "status": "MEASURED. This reopens the problem on the playback/mixing side, and closes the monitor argument that sent six builds upstream."
+  },
+  "THE_PAIR_IS_ch21_AND_ch23_2026_08_30": {
+    "measured_run_130": "Every non-zero mixer write during a stereo recording:  MIXER ch21 raw 000000008000 -> L=80 R=00 (hard left);  MIXER ch23 raw 000000000080 -> L=00 R=80 (hard right);  and KEYON ch16 / KEYON ch23 around them.",
+    "the_pair": "23 ^ 2 = 21. So the firmware programs the stereo pair as ch21 (hard left) + ch23 (hard right) - EXACTLY the complementary ^2 pair the MPC3000 heuristic in key_on was written for. ch16 is not part of it: its raw is 000000060000, dest=06 with both volumes zero.",
+    "why_earlier_probes_missed_it": "SAMPLING 129's VOICE-PAN only logs voices the firmware keys explicitly - ch16, ch23, ch29 - so ch21 never appeared and I read that as 'the partner is keyed silent'. The partner is not keyed by the firmware at all; it is supposed to be started by our heuristic.",
+    "the_race": "The write order is NOT stable. At t=20.9793 the mixer writes come BEFORE KEYON ch23; at t=22.8348 KEYON ch23 comes FIRST and ch23's own mixer is written after it. The heuristic reads the volumes AT KEY-ON, so in the second ordering it tests values the firmware has not written yet, the partner is never started, and the sample has one side.",
+    "status": "SAMPLING 131 built (mame bundle 17:15:13) - it reports the partner decision and every value it rests on, so the cause is named rather than inferred from an absence. Nothing changed."
+  },
+  "PLAYBACK_PAIR_IS_FIXED_2026_08_30": {
+    "fix": "SAMPLING 132 (mame@23f09221) removed the !BIT(m_key, partner) guard from the stereo-pair start in l7a1045 key_on. That guard tested a behaviour the S3000XL does not have: nothing on this machine ever clears a key bit - voices loop rather than ending, and the only clear in the device is an MPC3000-specific 'timed 0 to offset 0' write. So it admitted the partner once, on the first pair the machine ever played, and refused it for the rest of the session.",
+    "verified_run_133": "PARTNER ch23 ^2 -> ch21 -> START, and PARTNER-STARTED ch21 start 020C00 end 02B850 L=80 R=00 env=2C16 type=0. Both voices of the pair now run, hard-panned, with live envelopes and real addresses. Also ch29/ch31 for the monitor.",
+    "KEEP": "This fix is correct on its own terms and stays. Mono cannot be affected - a mono voice has equal left and right volumes so the complementary test never matches.",
+    "but_still_one_sided": "ch21 points at 020C00..02B850, which is the PREVIOUS MONO recording's region, and ch23 at 02B850..035DA0, where the stereo recording went. DMA-BURST measured dest 02B850 words 92054 - the whole recording - against 2048 words in the other region. So the playback pair is right and one of its two samples has no data.",
+    "what_this_narrows": "The fault is NOT the pair start, the panning, or the key bit. Those are now excluded by measurement. The single remaining statement is: A STEREO RECORDING WRITES THE WHOLE STREAM INTO ONE SAMPLE AND ONE BLOCK INTO THE OTHER.",
+    "probe_lesson": "SAMPLING 133: the PARTNER decision string still carried the term SAMPLING 132 had removed from the branch, so the log printed 'no' for cases the code took. A probe must be tied to the branch beside it."
+  },
+  "ONE_WORD_PER_FRAME_SETTLED_BY_REGION_SIZE_2026_08_30": {
+    "verdict": "SETTLED, and this time by the machine's own allocation rather than by listening. Reverted to mame@3ef1ef7f, bundle 18:04:17.",
+    "measured_run_134": {
+      "A/D": "ADC-RATE 87658 words/s STEREO, L=R - the machine takes every word offered",
+      "region": "VOICE-KEYON ch16 and ch23 both start 0363A0 end 0408F0 = 0xA550 = 42320 words, about ONE SECOND at 44100 - the same size a MONO recording gets",
+      "written": "DMA-BURST dest 02B750 words 94318 in a ~1.08 s window = ~88200 words/s, all into that one region; the other region got 2048"
+    },
+    "argument": "The machine allocates a 44112-word region for one second of STEREO - identical to mono - and its own display says 1.00s = 88200 BYTES = 44100 words. Feeding 88200 words a second puts twice the data in a region sized for half of it, and a voice stepping one word per sample then plays it at half speed. That is exactly the octave Thor hears ON THE MONITOR, which is a single voice reading the same buffer.",
+    "so": "The machine does not want two words per frame, in any form. Seven builds have now tried it - 111, 112, 119, 122, 126, 128 and this reapplication - and this is the first time the reason is a number the FIRMWARE chose rather than a judgement about a sound.",
+    "one_thing_this_build_did_prove": "With two words per frame the waveform drawing came into sync with the recording time and the drawn shape matched the mono one. So the drawing follows the DATA RATE, and in the correct build it is short - which is a symptom worth keeping in mind rather than a fix.",
+    "kept": "The playback pair fix (SAMPLING 132) stays - it is correct on its own terms and independent of this."
+  },
+  "SPLIT_MECHANISM_WORKS_ADDRESS_IS_WRONG_2026_08_30": {
+    "what_was_proved": "The bit-3 split MECHANISM works. With it in place, DMA-BURST shows the -L region receiving 47170 words in ~1.07 s = 44100/s, out of 88200 arriving - so half the stream really does go to the second destination. Before this, everything went into one region, which is why every earlier attempt gave an octave, and the waveform drawing came into sync in stereo for the first time.",
+    "what_was_wrong": "The ADDRESS. [7912:7914] is not a plain byte address. The arm routine at 26177 builds the chip's destination from it by nibble rotation: mov ax,[7772] / ror ax,4 / and ax,F000 -> out 82 / and ax,0FFF or di -> out 84, and mov di,[7774] / ror di,4 / and ax,001F / or ax,0100 -> out 86. I converted with a plain >>1, which was a guess, so the second half was written somewhere wrong. Thor: no right channel, and ugly crackling at the start of the recording.",
+    "reverted": "SAMPLING 148, 148b and the SAMPLING 122 reapplication are all out (mame@cf610a94, bundle 20:26:53). Mono is back to the state that records flawlessly.",
+    "next_step": "Derive the second destination the way the chip does - through the same ror-4 packing the arm routine uses - rather than assuming a unit. The mechanism does not need to be re-tested; only the address does.",
+    "note": "The crackling at the start is intermittent across runs with identical code, like the click before it. Two run-dependent symptoms now, and they may share a cause."
+  },
+  "STEREO_RECORDING_WORKS_2026_09_13": {
+    "fix": "SAMPLING 149 (mame@38158a24). The second destination of the bit-3 split is the firmware's own [7914:7912] taken UNSHIFTED. SAMPLING 148 had shifted it right by one to 'convert to words' - a guess about a unit, wrong in the wrong direction.",
+    "derivation": "The arm routine at 26177 packs the destination into the chip's 48-bit register layout with ROR 4: out 86 = (ror(hi,4) & 001F) | 0100 gives a[23:20] = hi[7:4]; out 82 = ror(lo,4) & F000 gives a[3:0] = lo[3:0]; out 84 = (ror(lo,4) & 0FFF) | (ror(hi,4) & F000) gives a[15:4] = lo[15:4] and a[19:16] = hi[3:0]. Reassembled: a[23:0] = D[23:0]. The ROR is PACKING, not conversion.",
+    "cross_check": "Independent, from data already recorded: for the -L transfer BLOCKREQ measured [7772]=0400 [7774]=0002, so D = 020400, and DMA-BURST - which prints m_voice[0].start - reported dest 020400 for that same transfer. Identical, no shift between them. That is what makes this a derivation rather than a second guess.",
+    "measured_run_149": {
+      "STEREO-DEST": "voice.start 0407F0, taken unshifted at the moment the firmware writes it",
+      "ADC-RATE": "88200 words/s STEREO, L=174847 R=174846 - both channels delivered",
+      "DMA-BURST": "dest 0363A0 words 47174 in a 1.08 s recording = ~44100/s - the -L region gets exactly HALF the arriving stream, so the other half goes to the stereo base"
+    },
+    "thor": "The test result is wonderful - as if it were solved in one move. Real panned stereo still to be tested.",
+    "what_is_still_only_an_inference": "The -R region's word count. DMA-BURST follows m_voice[0].start only, so the second destination bypasses it; the -L half is measured and the other half is deduced. SAMPLING 150 adds STEREO-BURST, one line a second on the second destination, so the panned test closes with a number.",
+    "the_three_pieces": "None works without the others: the right word handed over (122), store headroom between the strobe edges (122), and the bit-3 split with the firmware's own second base (149). Seven earlier builds failed because one or two of the three were present without the rest, or because the address was guessed.",
+    "status": "DONE. Remaining on this instrument: REC GAIN / REC VOLUME (unmodelled, ~12 dB, entirely in the playback path since the recording is 1:1 at the storage point).",
+    "CLOSED_with_numbers": "STEREO-BURST dest 02B050 words 44099 this second, against DMA-BURST dest 020C00 words 47179 for the -L, with ADC-RATE 88200 words/s STEREO L=R. The split is exact - one channel's worth to each destination - and BOTH halves are now measured rather than one being deduced.",
+    "thor_verdict": "It records in stereo. Release blocker closed.",
+    "instrument_cost": "The STEREO-BURST counter called machine().time() on EVERY right word, 44100/s, and Thor felt the plugin stutter. Third time an instrument of mine has been felt. Fixed in SAMPLING 151: the clock is read once every 4096 words, the counter runs free.",
+    "probes_quiet": "BLOCKREQ, RECMODE, WPTR-L and the RINGRD table are behind S3000_FW_PROBES now. The tap on [7912:7914] STAYS INSTALLED - it is no longer a probe but the mechanism by which the chip learns the second destination; only its logging is silenced."
+  },
+  "GOLD_2026_09_13": {
+    "commit": "mame@184c1fe6, tag S3000XL-GOLD-2026-09-13",
+    "bundle": "06:39:16",
+    "thor": "GOLD VERSION - the plugin runs perfectly, everything is good.",
+    "works": {
+      "mono recording": "flawless",
+      "stereo recording": "88200 words/s in, 44100 to one destination and 44099 to the other - both halves measured",
+      "capture level": "1:1 at the storage point; the machine's OWN input meter, which is firmware and not ours, tracks the input - independent confirmation",
+      "direct monitoring": "CORRECTED 2026-09-13 by Thor, and it separates two things previously merged: the MON button - monitoring the input BEFORE a recording - is NOT implemented; the pass-through DURING a recording works but is INDEPENDENT of that button (it passes with the button on or off) and appears only after one stereo recording has been made. So the 'monitor needs one stereo recording first' observation is STILL OPEN. I retired it prematurely on an ambiguous report.",
+      "playback voice pair": "fixed (SAMPLING 132)",
+      "memory corruption": "solved (golden v3)",
+      "12x store rate": "solved (SAMPLING 87)"
+    },
+    "meters_off": "S3000_DSP_METERS and S3000_AD_METERS at 0 - both read the clock on every transferred word, which is what Thor felt as a stutter. Fourth instrument in this project noticed by ear. The tap on [7912:7914] STAYS: it is mechanism, not measurement.",
+    "not_present_and_a_feature": "MULTI OUT. The eight individual outputs are already modelled in l7a1045 (send_dest, the 5,1,4,0,7,3,6,2 mapping); the plugin carries only the stereo pair out. VST3 bus configuration, not emulation - bounded work rather than investigation.",
+    "still_open": "REC GAIN / REC VOLUME are unmodelled - wanted, not urgent, and REC GAIN is adjustable from the host meanwhile (Thor: 'hab a tortan'). THE ~12 dB DOES NOT EXIST - Thor struck it on 2026-09-13; it was my reading carried as an open item, and it must not be re-opened or attached to REC GAIN. Pre-record monitoring is not implemented."
+  },
+  "MULTIOUT_DONE_2026_09_13": {
+    "verdict": "Thor: OUT1-8 -> DAW1-8 perfect, the stuttering is gone. Multi out is DONE.",
+    "what_was_already_there": "The emulation side was finished and nobody had noticed. l7a1045 allocates TEN outputs (L6028_LEFT, L6028_RIGHT, L6028_OUT0..OUT7) and already wrote the discrete ones with stream.add_int(2 + channel_remap[dest], ...). Missing was only the driver: a two-channel speaker with the stereo pair routed, so eight outputs were computed every sample and thrown away.",
+    "layout": "Eight MONO buses plus the main stereo pair, ten in all - Thor's call, and his reason: sending drums out separately would be odd with the kick on the right of one stereo channel and the open hat on the left. The machine has eight separate jacks.",
+    "jack_order": "MEASURED END TO END, not derived. Thor stepped indiv: 1..8 and read where each came out. The machine's OUT n arrives on L6028_OUT [4,6,5,7,0,2,1,3], so routing those to indiv channels 0..7 puts OUT n on DAW n. If channel_remap or the firmware's dest numbering ever changes, RE-MEASURE with the same eight-step test rather than reasoning about it.",
+    "routing_settled_by_three_sources": "Anything sent to an individual output is ALSO summed to the stereo pair. (1) the machine's own program page shows 'stereo level: 99' and 'indiv: 8 lev:50' as two live parameters; (2) the device models exactly that - l_volume/r_volume for the pair, send_level for the send; (3) a Sound On Sound post: 'Anything assigned to the individual outputs are summed and always appear at the stereo outputs as well. It has ever been thus since the S900/1000.' Removing a sound from the main is the user's choice of stereo level, not a routing mode. Thor expected the opposite and the evidence corrected us both.",
+    "the_mix_map_is_derived": "The plugin computes stride and offsets at runtime by walking speaker_device_enumerator and matching the speaker TAG, exactly as emu/sound.cpp lays the record buffer out. The old hardcoded 'stride 3, ch0 = floppy' was a real measurement that silently expired the moment a speaker was added. Measured after the change: MIXMAP stride=11 main=1 indiv=3.",
+    "floppy_speaker": "enable_sound(false) does NOT remove it - floppy_image_device::device_add_mconfig creates the speaker unconditionally, so the stride is 11 and not the 10 I expected. Removing it would mean editing floppy.cpp, which hundreds of drivers use. It stays as one silent channel, handled by the derived map. Deriving is what caught this; a hardcoded stride would have shifted every channel.",
+    "THE_STUTTER_WAS_THE_PROBES": "FIFTH time in this project that an instrument of mine was noticed by ear. I had a plausible and WRONG theory - that the mix stride going from 3 to 11 was the cost - and had I acted on it I would have spent the next round making the indiv speaker optional, solving a problem that did not exist. Removing the 64 MAME logerror calls and the plugin's per-frame peak meter fixed it. The rule stands and has now cost five rounds: an instrument on an always-running path is itself an intervention.",
+    "status": "DONE"
+  }
+}

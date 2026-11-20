@@ -1,0 +1,16 @@
+# No copyrighted ROMs / firmware / disk images in the repo.
+# The plugin is non-functional without user-supplied ROMs (that is what keeps distribution legal).
+*.bin
+*.chd
+*.iso
+*.img
+*.hfe
+*.eeprom
+*.nrg
+*.cue
+
+# Build / editor artifacts
+*.log
+Builds/
+JuceLibraryCode/
+.vs/
