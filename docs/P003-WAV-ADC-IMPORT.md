@@ -10,6 +10,12 @@
 - Original firmware WADCS record strobe (port A bit3, already measured in upstream) starts WAV delivery on actual firmware GO; the STOP transition suspends it. Pre-REC ARM does **not** silently consume WAV. Source tail is explicit silence. The original physical REC GAIN applies to WAV input; output routing remains unchanged.
 - Mono/stereo samples preserve channel order. Source has no autoplay while idle and no hidden DAW MIDI injection.
 
+## Native CI evidence (2026-11-20)
+- GitHub Actions [run 44812380200](https://github.com/challanger2000/125A-Akai-S3000XL-VST3/actions/runs/44812380200): **SUCCESS on windows-latest and ubuntu-latest**.
+- Three CTest executables compiled and passed on each operating system: `akai_analog_control_contract`, `akai_firmware_monitor_contract`, `akai_wav_input_contract`. Total **3/3 on Windows and 3/3 on Ubuntu**.
+- The WAV contract exercises the bounded decoder, mono/stereo, PCM8/16/24/32, float32, WAVE_FORMAT_EXTENSIBLE, source-rate conversion, malformed inputs, no playback before explicit trigger, playback on trigger, STOP and trigger restart.
+- **This is not** a compilation of the complete Akai/MAME/JUCE VST3, not a V2.0 original-firmware test, and not a demonstration of an automatically mapped or DAW-recallable Akai sample.
+
 ## Functional limits – DO NOT LABEL THIS A FINISHED ONE-CLICK IMPORT
 This P003 **implements WAV decoding, in-plugin selection and playback into the original Akai recording ADC.** It is not yet the complete Emulator-II/III user-facing workflow. A user must currently configure the original `SAMPLE -> REC` screen (name, time, mode), press **ARM** then **GO**, and use the firmware to finish/assign the resulting sample. A one-click button that automatically creates a sample and suitable program/keygroup **does not yet exist**.
 
