@@ -83,7 +83,9 @@ jobs:
           New-Item -ItemType Directory -Force -Path reports | Out-Null
           $env:125A_PLUGIN_TESTER_REPORT_DIR=(Resolve-Path reports).Path
           Write-Output "Testing actual bundle: $bundle"
-          $p=Start-Process -FilePath $exe.FullName -ArgumentList @("""$bundle""") -PassThru
+          # The portable v0.3.2 executable opens its GUI by default.
+          # --portable-test is its documented headless dispatcher switch.
+          $p=Start-Process -FilePath $exe.FullName -ArgumentList @('--portable-test', """$bundle""") -PassThru
           try {
             Wait-Process -Id $p.Id -Timeout 420 -ErrorAction Stop
           } catch {
