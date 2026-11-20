@@ -51,13 +51,14 @@ The **user-facing workflow should match the Emulator II/III**: directly choose/l
 - The **Mon** softkey / meter monitoring remains open and is not a physical analogue knob.
 - See `docs/P001-ANALOG-CONTROLS.md` for provenance and remaining verification.
 
-## Development order
-1. Reproduce a Windows x64 VST3 build from the upstream baseline (JUCE, MAME 0.288, Visual Studio 2022).
-2. Verify boot, firmware/ROM requirements, MIDI, 10 audio outputs, sampling, media loading and original sound path.
-3. Audit actual project recall, simultaneous instances, and RAM configuration/capacity before claiming support.
-4. Investigate and implement missing REC GAIN, REC VOLUME, pre-record MON operation.
-5. Evaluate the optional EB16 hardware/effects separately; no implementation is claimed.
-6. Validate audio, performance, stability and VST3 lifecycle with automated tests before the final DAW acceptance run.
+## Development order (owner priority, 2026-11-20)
+1. Implement both physically present knobs, **REC GAIN and MAIN VOLUME**, and their actual input/Main L/R audio signal effects. **P001 source written; isolated C++ checks PASS; Windows/host gates OPEN.**
+2. Complete the original firmware **Mon** function and the outstanding pre-record/first-stereo-record monitoring anomaly; keep native firmware display and behavior.
+3. Implement **one-step direct WAV import** consistent with the user's Emulator II/III workflow, using original Akai firmware registration/processing rather than silent RAM bypass.
+4. Reproduce a native Windows x64 VST3 build with JUCE, MAME 0.288 and VS2022; replace upstream absolute F: drive paths and integrate private ROMs outside the public Git repository.
+5. Demonstrate firmware V2.0 boot, MIDI and 10 output buses, genuine recording/playback and WAV import. Validate real 32 MiB RAM, true project/sample recall and concurrent instances.
+6. Optimize sample load speed and realtime/host reliability without changing the original Akai sound path without evidence.
+7. Treat optional EB16 effects hardware as a distinct later extension. Finish automated QA/validator/125A probes and only then the final Fender Studio Pro acceptance.
 
 ## Acceptance policy
 - No modified playback DSP without A/B tests against the original firmware/emulation reference.
@@ -66,8 +67,8 @@ The **user-facing workflow should match the Emulator II/III**: directly choose/l
 - Do not claim any test passed unless an actual test report demonstrates it.
 - Perform the final practical Fender Studio Pro / Studio One acceptance only after automated technical checks.
 
-## Known upstream limitations (reported, **not yet retested here**)
-- `REC GAIN` and `REC VOLUME` are ineffective.
+## Known upstream limitations (reported, **not yet firmware/DAW retested here**)
+- Upstream `REC GAIN` and `MAIN VOLUME` were ineffective; our development branch now contains unvalidated signal/control wiring (see P001).
 - Pre-record `MON` input monitoring is missing.
 - Sample loading is slower than physical hardware.
 - EB16 hardware/effects emulation is not established.

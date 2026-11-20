@@ -25,7 +25,7 @@ Working:
 | Parameters | 45 automatable VST parameters |
 | Display | Live refresh (blinking cursor, sample-load progress, live waveform while recording) |
 
-Not yet implemented:
+Known limitations and development work (125A branch):
 
 * **125A development branch:** physical `REC GAIN` and `MAIN VOLUME` control paths are now coded
   (pre-A/D and Main L/R output respectively). This source change has **not** yet passed a native
