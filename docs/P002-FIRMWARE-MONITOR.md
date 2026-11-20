@@ -21,6 +21,11 @@ The first independent Actions `git apply --check` against the official `mamedev/
 - Both changes are a baseline/compatibility fix, not a behavioral change to Akai audio. Re-run the independent patch applicability check on each subsequent patch revision.
 - This does **not** assert a successful full MAME compile or ROM boot.
 
+## Verified CI evidence (2026-11-20)
+- [Isolated native core contracts](https://github.com/challanger2000/125A-Akai-S3000XL-VST3/actions/runs/44810505993): **PASS on Windows and Ubuntu**, both tests compiled and CTest executed. This verifies only independent analogue and MON state/mixing helpers.
+- [MAME 0.288 patch applicability](https://github.com/challanger2000/125A-Akai-S3000XL-VST3/actions/runs/44810866097): **PASS**, `git apply --check` using the official upstream `mame0288` checkout, after removing obsolete `upd71071_device` instrumentation and correcting `s3000.cpp` hunk context.
+- No complete VST3 binary, native MAME compilation, boot test, or ROM-backed MON/Moff verification has been performed by these jobs. The firmware bit-5 interpretation remains provisional.
+
 ## Validation and uncertainty
 - `tests/AkaiFirmwareMonitorTests.cpp` tests the known WADCS transition policy and gain-mixing arithmetic; it **does not** prove bit 5 is the original MON state.
 - **P002 is an instrumented candidate implementation, not accepted firmware emulation** until the ROM-backed runs demonstrate: RECORD page MON→MOFF toggle, MOFF→MON toggle, ARM (auto-enable), GO and STOP (auto-disable), mono then stereo and vice versa, correct LEFT/RIGHT, no duplicate monitor during recording, and no influence on recorded PCM.
