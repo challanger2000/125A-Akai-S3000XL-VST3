@@ -57,7 +57,7 @@ jobs:
           # POSIX-relative path. Use the MinGW *native Windows* Python.
           test -f /mingw64/bin/python.exe
           /mingw64/bin/python.exe -c "import sys; assert sys.platform == 'win32'"
-          make vs2022 SUBTARGET=s3000xl SOURCES=src/mame/akai/s3000.cpp NOWERROR=1 PYTHON_EXECUTABLE=/mingw64/bin/python.exe -j2
+          make vs2022 SUBTARGET=s3000xl SOURCES=src/mame/akai/s3000.cpp NOWERROR=1 PYTHON_EXECUTABLE=python.exe -j2
       - name: Compile full MAME static libraries
         shell: pwsh
         run: |
