@@ -17,6 +17,24 @@ This repository imports the **original upstream source and patch files unchanged
 - Verify MAME firmware boot and live LCD output with this specific ROM set before claiming that bundling works.
 - Private integration is intended solely for the user's own use; do not release/distribute a ROM-inclusive build without independently confirming rights to do so.
 
+## WAV import requirement — one-step, no external tools
+The user wants to import ordinary Windows .wav samples **directly into the running emulated Akai**, using an in-plugin file picker and/or drag-and-drop. Import must not require the user to create, manage or mount floppy/HDD images or run an external converter.
+
+### Preferred implementation to investigate
+- Decode WAV inside the plugin (mono and stereo, common PCM and float encodings) with explicit conversion to supported native Akai S3000 sample representation, with no accidental normalization/clipping.
+- Make sample data available to the **original Akai firmware** via a safe internal virtual-media/transfer path; preserve its native program/sample management, keygroup semantics, MIDI playback and DSP. Avoid ad-hoc writes into sample RAM that bypass firmware bookkeeping.
+- Deliver one-step user UX: choose/drop a WAV -> conversion + transfer + original-OS sample registration/load -> immediately audibly usable/assignable, with clear failure feedback.
+- Compare the converted audio and resulting Akai sample metadata with known native S3000 images. Check stereo channels, loop points, sample rate, length, pitch/root note, name handling, memory limits and level accuracy.
+- Save and reopen the DAW project: imported sample bytes **and** native Akai program/mapping/selection must survive, independent of the original WAV remaining on disk. Different VST instances must not share mutable import state.
+- Prefer a fully integrated conversion module, not a separately installed program. Study `akaiutil` for format-validation reference only pending compatibility/licensing evaluation (its published license is GPLv2, while this project combines GPLv3 components).
+- This feature is **not implemented upstream**. The plugin currently accepts DAW input for original-firmware sampling and mounts Akai floppy/CD/SCSI images; those are distinct from direct WAV import.
+
+### Repository audit flags (initial source inspection; needs actual tests)
+- The upstream code still contains legacy Ensoniq SD-1 names, OS-RAM and sequencer-RAM save/restore code, and a UI message claiming "10 specific .bin files." These are suspect for the S3000XL, which requires the main V2.0 firmware and HD61830 character ROM. Audit/remove only after checking which paths are live.
+- MAME sample-memory region is mapped to 32 MiB, but effective S3000XL V2.0 detected size must be measured with firmware.
+- The upstream save-state code visibly serializes SD-1 `osram`/`seqram` shares; that is **not a proof** S3000XL sample RAM and programs are restored correctly. True sample/project recall is a priority.
+- MAME global process state may prevent safe simultaneous VST instances, as upstream port notes warn. Verify, do not assume.
+
 ## Development order
 1. Reproduce a Windows x64 VST3 build from the upstream baseline (JUCE, MAME 0.288, Visual Studio 2022).
 2. Verify boot, firmware/ROM requirements, MIDI, 10 audio outputs, sampling, media loading and original sound path.
