@@ -42,6 +42,14 @@ The **user-facing workflow should match the Emulator II/III**: directly choose/l
 - The upstream save-state code visibly serializes SD-1 `osram`/`seqram` shares; that is **not a proof** S3000XL sample RAM and programs are restored correctly. True sample/project recall is a priority.
 - MAME global process state may prevent safe simultaneous VST instances, as upstream port notes warn. Verify, do not assume.
 
+## P002 original-firmware MON bridge (candidate, not accepted)
+- The original Akai V2.0 firmware physically controls RECORD page **MON/Moff** and auto-enables on ARM and disables after a completed recording. **Do not add an invented GUI monitor toggle.**
+- Original project recordings measured WADCS control port `0x00C0` sequence `A2` idle, `82` ARM, `8A` mono GO, `9A` stereo GO, `A2` STOP. Port bit 3 is verified record strobe, bit 4 is verified stereo; bit 5 is only a candidate for the MON inhibit, not yet verified by a MON↔Moff toggle.
+- MAME patch now forwards true firmware latch writes to the VST via `s3000xl_wadcs`. The VST uses a per-instance atomic latch and zero-copy pre-record monitor mixing from the existing post-REC-GAIN input ring into Main L/R, with a 5ms crossfade.
+- The existing firmware/MAME live monitor DURING recording must not be doubled by the host. Main Volume must apply to monitored audio; OUT 1–8 remain unaffected.
+- **NOT complete:** actual MON/Moff on/off mapping must be checked by an original-ROM session; bit5 interpretation is provisional. The isolated native tests check the routing implementation and known register sequence **only**, not physical-device fidelity.
+- Technical evidence, acceptance cases and limitations: `docs/P002-FIRMWARE-MONITOR.md`.
+
 ## P001 implementation in development (not yet Windows-built)
 - **REC GAIN and MAIN VOLUME source wiring implemented** on `develop/v1.0.0`. The original Akai operator's manual identifies the second knob as **MAIN VOLUME**, not "REC VOLUME".
 - Native MAME-panel hotspots now carry real host parameter gestures, and values reach pre-A/D input attenuation and the post-DSP Main L/R output attenuation, respectively. OUT 1..8 are intentionally unaffected by MAIN VOLUME.
@@ -53,7 +61,7 @@ The **user-facing workflow should match the Emulator II/III**: directly choose/l
 
 ## Development order (owner priority, 2026-11-20)
 1. Implement both physically present knobs, **REC GAIN and MAIN VOLUME**, and their actual input/Main L/R audio signal effects. **P001 source written; isolated C++ checks PASS; Windows/host gates OPEN.**
-2. Complete the original firmware **Mon** function and the outstanding pre-record/first-stereo-record monitoring anomaly; keep native firmware display and behavior.
+2. Complete the original firmware **Mon** function and outstanding first-stereo-record monitoring anomaly; **P002 gated source bridge implemented, firmware/DAW validation OPEN**. Keep native firmware display and behavior.
 3. Implement **one-step direct WAV import** consistent with the user's Emulator II/III workflow, using original Akai firmware registration/processing rather than silent RAM bypass.
 4. Reproduce a native Windows x64 VST3 build with JUCE, MAME 0.288 and VS2022; replace upstream absolute F: drive paths and integrate private ROMs outside the public Git repository.
 5. Demonstrate firmware V2.0 boot, MIDI and 10 output buses, genuine recording/playback and WAV import. Validate real 32 MiB RAM, true project/sample recall and concurrent instances.
@@ -79,4 +87,4 @@ The **user-facing workflow should match the Emulator II/III**: directly choose/l
 - Revision: `d4a5042dffa26fd833eafae5c0cc9d26e69ef99e`
 - License: GPLv3, see `LICENSE`
 
-**Current development status:** P001 analogue controls coded with isolated C++ unit tests; native Windows build, original firmware operation, integrated audio and host/DAW validation remain NOT RUN. Stable upstream import remains on `main`.
+**Current development status:** P001 analogue controls plus P002 firmware-WADCS monitor bridge coded in `develop/v1.0.0`. The MON bit-5 meaning is provisional until ROM-backed switching is observed; Windows VST3 build, integrated audio and DAW acceptance remain NOT RUN. Upstream import is preserved on `main`.

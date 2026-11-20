@@ -2379,7 +2379,7 @@ index 44db8253..390b9bc3 100644
  }
  
  // stock wave memory is 4x HM514400 1Mx4 = 2 MiB
-@@ -531,6 +1521,1105 @@ HD44780_PIXEL_UPDATE(s3000_state::lcd_pixel_update)
+@@ -531,6 +1521,1112 @@ HD44780_PIXEL_UPDATE(s3000_state::lcd_pixel_update)
  	}
  }
  
@@ -2463,6 +2463,13 @@ index 44db8253..390b9bc3 100644
 +{
 +	const uint8_t prev = m_inctl;
 +	m_inctl = data;
++
++	// [125A P002] Expose the firmware's actual WADCS port-A writes to
++	// the VST host. No inferred bit meanings in the MAME driver: the
++	// callback forwards the complete original latch value unmodified.
++	// An output event is rare (control transitions only), never per DMA word.
++	if (prev != data)
++		machine().output().set_value("s3000xl_wadcs", data);
 +
 +	// [SAMPLING 111] bit 4 is the mode - see the note on m_adc_stereo for how it was measured. The old
 +	// LEFT-DMA / RIGHT-DMA names are gone because bit 1 is set in every value the firmware ever writes
@@ -3485,7 +3492,7 @@ index 44db8253..390b9bc3 100644
  uint16_t s3000_state::dma_mem16r_cb(offs_t offset)
  {
  	return m_maincpu->space(AS_PROGRAM).read_word(offset << 1);
-@@ -588,8 +2677,13 @@ void s3000_state::base(machine_config &config)
+@@ -588,8 +2684,13 @@ void s3000_state::base(machine_config &config)
  	m_maincpu->out_memw_cb().set(FUNC(s3000_state::dma_memw_cb));
  	m_maincpu->in_mem16r_cb().set(FUNC(s3000_state::dma_mem16r_cb));
  	m_maincpu->out_mem16w_cb().set(FUNC(s3000_state::dma_mem16w_cb));
@@ -3501,7 +3508,7 @@ index 44db8253..390b9bc3 100644
  	m_maincpu->sint_handler_cb().set_inputline(m_maincpu, INPUT_LINE_IRQ0);
  	m_maincpu->txrdy_handler_cb().set_inputline(m_maincpu, INPUT_LINE_IRQ4);
  
-@@ -598,7 +2692,54 @@ void s3000_state::base(machine_config &config)
+@@ -598,7 +2699,54 @@ void s3000_state::base(machine_config &config)
  	m_maincpu->in_ior_cb<1>().set(m_fdc, FUNC(upd72069_device::dma_r));
  	m_maincpu->out_iow_cb<1>().set(m_fdc, FUNC(upd72069_device::dma_w));
  	m_maincpu->in_io16r_cb<3>().set(m_dsp, FUNC(l7a1045_sound_device::dma_r16_cb));
@@ -3557,7 +3564,7 @@ index 44db8253..390b9bc3 100644
  
  	m_maincpu->set_tclk(32_MHz_XTAL/32); // only timer 2 uses external TCLK, and it needs to be ~1 MHz for panel key repeat to be sane
  	m_maincpu->v53_tout_handler<0>().set_inputline(m_maincpu, INPUT_LINE_IRQ1);
-@@ -606,7 +2747,7 @@ void s3000_state::base(machine_config &config)
+@@ -606,7 +2754,7 @@ void s3000_state::base(machine_config &config)
  	constexpr XTAL V53_CLKOUT = 32_MHz_XTAL / 2;
  //  constexpr XTAL V53_PCLKOUT = 32_MHz_XTAL / 4;
  
@@ -3566,7 +3573,7 @@ index 44db8253..390b9bc3 100644
  
  	SCREEN(config, m_screen, SCREEN_TYPE_LCD);
  	m_screen->set_refresh_hz(80);
-@@ -625,7 +2766,11 @@ void s3000_state::base(machine_config &config)
+@@ -625,7 +2773,11 @@ void s3000_state::base(machine_config &config)
  	m_fdc->drq_wr_callback().set(m_maincpu, FUNC(v53a_device::dreq_w<1>));
  	m_fdc->ts_rd_callback().set(FUNC(s3000_state::ts_r));
  
@@ -3579,7 +3586,7 @@ index 44db8253..390b9bc3 100644
  
  	HD61830(config, m_lcdc, 4.9152_MHz_XTAL / 2 / 2); // LC7981
  
-@@ -680,13 +2825,87 @@ void s3000_state::base(machine_config &config)
+@@ -680,13 +2832,87 @@ void s3000_state::base(machine_config &config)
  
  	SPEAKER(config, "speaker", 2).front();
  
@@ -3668,7 +3675,7 @@ index 44db8253..390b9bc3 100644
  	TIMER(config, "dialtimer").configure_periodic(FUNC(s3000_state::dial_timer_tick), attotime::from_hz(60.0));
  }
  
-@@ -696,7 +2915,7 @@ void s3000_state::s2000(machine_config &config)
+@@ -696,7 +2922,7 @@ void s3000_state::s2000(machine_config &config)
  	m_maincpu->set_clock(31.9488_MHz_XTAL);
  	m_maincpu->set_addrmap(AS_PROGRAM, &s3000_state::s2000_map);
  	m_maincpu->set_addrmap(AS_IO, &s3000_state::s2000_io_map);
@@ -3677,7 +3684,7 @@ index 44db8253..390b9bc3 100644
  
  	config.device_remove("lcdc");
  
-@@ -725,13 +2944,61 @@ void s3000_state::s3000xl(machine_config &config)
+@@ -725,13 +2951,61 @@ void s3000_state::s3000xl(machine_config &config)
  	base(config);
  	m_maincpu->set_addrmap(AS_PROGRAM, &s3000_state::s3000xl_map);
  	m_maincpu->set_addrmap(AS_IO, &s3000_state::s3000xl_io_map);

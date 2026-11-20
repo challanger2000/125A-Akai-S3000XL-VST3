@@ -1,0 +1,32 @@
+name: 125A Akai - MAME 0.288 patch integrity
+on:
+  push:
+    branches: [ 'develop/**' ]
+    paths:
+      - 'mame-0288-s3000xl-vst.patch'
+      - '.github/workflows/mame-patch-check.yml'
+  pull_request:
+    paths:
+      - 'mame-0288-s3000xl-vst.patch'
+      - '.github/workflows/mame-patch-check.yml'
+permissions:
+  contents: read
+jobs:
+  patch-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch only touched files from upstream MAME 0.288
+        run: |
+          git clone --filter=blob:none --depth=1 --branch mame0288 --no-checkout https://github.com/mamedev/mame.git mame-reference
+          git -C mame-reference sparse-checkout set --no-cone \
+            src/devices/machine/am9517a.cpp \
+            src/devices/sound/l7a1045_l6028_dsp_a.cpp \
+            src/devices/sound/l7a1045_l6028_dsp_a.h \
+            src/frontend/mame/ui/ui.cpp \
+            src/mame/akai/s3000.cpp \
+            src/zexall/main.cpp
+          git -C mame-reference checkout
+      - name: Check original patch applicability without applying changes
+        run: git -C mame-reference apply --check --verbose ../mame-0288-s3000xl-vst.patch

@@ -1,0 +1,26 @@
+# P002 – firmware-controlled MON signal bridge
+
+## Scope and evidence
+- The original S3000XL manual (record chapter, pp. 121–123) describes a **Mon/Moff** softkey: Mon switches input metering/monitoring ON, Moff switches it OFF; ARM enables monitoring, and recording completion disables it. This is a **firmware-owned** function, not a new plugin control.
+- Upstream `CLAUDE.md` documents original firmware WADCS port-A values from actual recordings:
+  `0xA2` idle; `0x82` armed; `0x8A` mono GO; `0x9A` stereo GO; `0xA2` after stop. Bit 3 is the record strobe, bit 4 the stereo selection.
+- **The meaning of bit 5 is not confirmed by a MON/Moff toggle trace.** Its transition `A2 -> 82` when ARM automatically turns the meter on is evidence for a candidate monitor-inhibit gate, but it may also participate in A/D control.
+
+## Source implemented
+- Patched MAME `s3000_state::inctl_w` now emits its **actual** `0x00C0` WADCS latch value unchanged using MAME's `output_manager`. No inventing firmware state, no hot-path log.
+- The VST3 observes the output with MAME 0.288 `set_notifier` and stores it in a per-instance atomic latch.
+- A candidate monitor state decoder maps bit-5 clear and record-strobe clear to **pre-record monitor enabled**.
+- When that gate is active, the DAW input – already scaled through the REC GAIN pre-A/D stage – is added to the Main L/R output through a five-millisecond click-free crossfade. There is no extra allocation or lock in the audio callback.
+- While firmware recording (strobe high), host direct monitoring is disabled to avoid doubling the original MAME recorder's existing monitor voices.
+- MAIN VOLUME is applied after this addition. The eight independent outputs, DSP and firmware are unaffected. No extra MON control appears in the DAW GUI.
+
+## Validation and uncertainty
+- `tests/AkaiFirmwareMonitorTests.cpp` tests the known WADCS transition policy and gain-mixing arithmetic; it **does not** prove bit 5 is the original MON state.
+- **P002 is an instrumented candidate implementation, not accepted firmware emulation** until the ROM-backed runs demonstrate: RECORD page MON→MOFF toggle, MOFF→MON toggle, ARM (auto-enable), GO and STOP (auto-disable), mono then stereo and vice versa, correct LEFT/RIGHT, no duplicate monitor during recording, and no influence on recorded PCM.
+- If the MON toggle does not change bit 5, replace the candidate decoder with the **observed actual firmware state signal** and keep the already separate host mixing path. Do not move the control into the GUI, do not invent another firmware flag.
+- ROMs and binary sample material stay private. This public repository contains **no original ROM bytes**.
+- The native C++ contracts can be tested in Windows/Linux Actions. Full MAME/JUCE linking and genuine ROM/host verification remain separate gates.
+
+## Source
+- Akai S3000XL Operator's Manual, SAMPLE chapter, available at https://www.firstpr.com.au/rwi/smem/akai-manuals/Akai_S3000XL_Manual.pdf
+- Original upstream `CLAUDE.md` and `mame-0288-s3000xl-vst.patch` log the firmware WADCS measurements.

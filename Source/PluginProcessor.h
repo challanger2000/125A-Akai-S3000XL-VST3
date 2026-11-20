@@ -36,6 +36,7 @@
 // Threading & Synchronization
 #include <thread>
 #include <atomic>
+#include <cstdint>
 #include <mutex>
 
 //==============================================================================
@@ -363,6 +364,11 @@ public:
     std::atomic<float>* mainVolumeParameter = nullptr;
     float smoothedRecGain = 1.0f;
     float smoothedMainVolume = 1.0f;
+    // Original firmware WADCS port-A latch, forwarded from MAME.
+    // No public MON parameter: the firmware remains the source of truth.
+    std::atomic<std::uint8_t> firmwareWadcsLatch{0};
+    std::atomic<bool> firmwareWadcsKnown{false};
+    float smoothedMonitorAmount = 0.0f; // audio thread only
     juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
 
     // Triggered by the DAW when an automation parameter changes

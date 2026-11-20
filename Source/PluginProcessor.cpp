@@ -10,6 +10,7 @@
 
 #include "PluginProcessor.h"
 #include "AkaiAnalogControls.h"
+#include "AkaiFirmwareMonitor.h"
 #include "PluginEditor.h"
 
 #include <iostream>
@@ -676,10 +677,10 @@ public:
         if (VstMameLog::instance().start())
             machine.add_logerror_callback([](const char *line) { VstMameLog::instance().write(line); });
         
-        // --- HOOK INTO MAME OUTPUTS (VFD & LEDs) ---
-        // S3000XL / MAME 0.288: output().set_global_notifier signature changed, and the VFD/LED
-        // notifier is SD-1-only (unused on the MPC). Disabled for the 0.288 build.
-        // machine.output().set_global_notifier(EnsoniqSD1AudioProcessor::mameOutputNotifier, processor);
+        // Observe the original firmware WADCS port-A control value without
+        // inventing a separate GUI toggle or adding per-sample logging.
+        machine.output().set_notifier("s3000xl_wadcs",
+            EnsoniqSD1AudioProcessor::mameOutputNotifier, processor);
                         
         int targetViewIdx = processor->requestedViewIndex.load(std::memory_order_acquire);
         int startW = processor->windowWidth.load(std::memory_order_acquire);
@@ -704,6 +705,7 @@ public:
             main_target = nullptr;
         }
         if (processor != nullptr) {
+                processor->firmwareWadcsKnown.store(false, std::memory_order_release);
                 processor->mameMachine = nullptr;
             }
         osd_common_t::osd_exit();
@@ -1726,6 +1728,7 @@ void EnsoniqSD1AudioProcessor::prepareToPlay (double sampleRate, int samplesPerB
         ? AkaiAnalogControls::normalized(recGainParameter->load(std::memory_order_relaxed)) : 1.0f;
     smoothedMainVolume = mainVolumeParameter != nullptr
         ? AkaiAnalogControls::normalized(mainVolumeParameter->load(std::memory_order_relaxed)) : 1.0f;
+    smoothedMonitorAmount = 0.0f; // reset crossfade on host reprepare
     
     auto* choiceParam = dynamic_cast<juce::AudioParameterChoice*>(apvts.getParameter("buffer_size"));
         if (choiceParam != nullptr) {
@@ -1861,9 +1864,10 @@ void EnsoniqSD1AudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, j
     int numChannels = buffer.getNumChannels();
     int totalNumInputChannels = getTotalNumInputChannels();
 
-    // [SAMPLING] CAPTURE FIRST - the input aliases the output channels in the same buffer, so this has
-    // to happen before anything writes to it. If the Sampler In bus is disabled (the default),
-    // totalNumInputChannels is 0 and this returns immediately.
+    // Capture the block position before the existing A/D ring is written.
+    // This is also our zero-copy pre-record MON source; the processor's
+    // validated REC GAIN stage has already been applied when read later.
+    const uint64_t monitorInputStart = samplerInWritten.load(std::memory_order_relaxed);
     pushAudioToMame(buffer, totalNumInputChannels, numSamples);
 
     // 2. PROTECTION: Safely clear the output channels that physically exist in the buffer.
@@ -2458,6 +2462,34 @@ void EnsoniqSD1AudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, j
             }
         }
     
+                // P002: MON. Decode real firmware WADCS writes, not GUI keys.
+                // Bit 5 as pre-record monitor inhibit is an evidence-based
+                // candidate (A2 idle / 82 ARM), pending MON/Moff verification.
+                // Disable direct pass-through during GO, leaving native
+                // firmware/DSP monitor voices unchanged.
+                const auto monitorMode = AkaiFirmwareMonitor::decode(
+                    firmwareWadcsLatch.load(std::memory_order_acquire),
+                    firmwareWadcsKnown.load(std::memory_order_acquire));
+                const bool monitorInputValid = totalNumInputChannels > 0
+                    && numSamples <= SAMPLER_IN_FRAMES;
+                const float monitorTarget = (monitorInputValid
+                    && monitorMode == AkaiFirmwareMonitor::Mode::Prerecord) ? 1.0f : 0.0f;
+                if (monitorTarget > 0.0f || smoothedMonitorAmount > 0.0f) {
+                    const float step = AkaiAnalogControls::smoothingCoefficient(static_cast<float>(sr));
+                    for (int i = 0; i < numSamples; ++i) {
+                        smoothedMonitorAmount = AkaiAnalogControls::smooth(smoothedMonitorAmount,
+                                                                           monitorTarget, step);
+                        const size_t slot = static_cast<size_t>((monitorInputStart + i)
+                                & (SAMPLER_IN_FRAMES - 1)) * SAMPLER_IN_CHANNELS;
+                        if (monitorInputValid && outL != nullptr)
+                            outL[i] = AkaiFirmwareMonitor::mix(outL[i],
+                                samplerInRing[slot + 0], smoothedMonitorAmount);
+                        if (monitorInputValid && outR != nullptr)
+                            outR[i] = AkaiFirmwareMonitor::mix(outR[i],
+                                samplerInRing[slot + 1], smoothedMonitorAmount);
+                    }
+                }
+
                 // Physical MAIN VOLUME: attenuate only stereo L/R after original
                 // MAME DSP. Individual outs 1-8 remain bit-identical.
                 const float mainTarget = mainVolumeParameter != nullptr
@@ -3183,8 +3215,13 @@ void EnsoniqSD1AudioProcessor::mameOutputNotifier(const char *outname, s32 value
     auto* processor = static_cast<EnsoniqSD1AudioProcessor*>(param);
     if (processor == nullptr || outname == nullptr) return;
 
-    // 1. Catch the global LED state (32-bit bitmask)
-    if (strcmp(outname, "lights") == 0) {
+    // WADCS hardware latch forwarded by the patched S3000XL MAME driver.
+    if (strcmp(outname, "s3000xl_wadcs") == 0) {
+        processor->firmwareWadcsLatch.store(static_cast<std::uint8_t>(value & 0xff),
+                                           std::memory_order_release);
+        processor->firmwareWadcsKnown.store(true, std::memory_order_release);
+    }
+    else if (strcmp(outname, "lights") == 0) {
         processor->ledStateMask.store(static_cast<uint32_t>(value), std::memory_order_relaxed);
     }
     // 2. Catch the VFD 14-segment characters (vfd0 through vfd79)

@@ -31,7 +31,10 @@ Known limitations and development work (125A branch):
   (pre-A/D and Main L/R output respectively). This source change has **not** yet passed a native
   Windows VST3 build or firmware-backed/DAW test. Analogue potentiometer tapers are not yet calibrated.
   The original second knob is MAIN VOLUME, not REC VOLUME (Akai S3000XL manual, p.18).
-* Monitoring the input *before* a recording starts (the `MON` button).
+* **125A branch P002:** pre-record monitor signal routing is implemented behind an original-firmware
+  `0x00C0` WADCS latch; the port-bit interpretation is provisional pending direct V2.0
+  MON/Moff firmware tests. This is **not a completed or validated MON implementation**.
+  See [P002 evidence and test contract](docs/P002-FIRMWARE-MONITOR.md).
 * Sample **loading** is slower than the hardware, a known cost of getting the transfer rate right.
 
 Open items and the measurements behind every decision are tracked in [`STATE.json`](STATE.json).

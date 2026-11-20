@@ -1,0 +1,32 @@
+name: 125A Akai - isolated Windows C++ contracts
+on:
+  push:
+    branches: [ 'develop/**' ]
+    paths:
+      - '.github/workflows/core-contracts.yml'
+      - 'Source/AkaiAnalogControls.h'
+      - 'Source/AkaiFirmwareMonitor.h'
+      - 'tests/**'
+  pull_request:
+    paths:
+      - '.github/workflows/core-contracts.yml'
+      - 'Source/AkaiAnalogControls.h'
+      - 'Source/AkaiFirmwareMonitor.h'
+      - 'tests/**'
+permissions:
+  contents: read
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ windows-latest, ubuntu-latest ]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -S tests -B build-core -DCMAKE_BUILD_TYPE=Release
+      - name: Compile
+        run: cmake --build build-core --config Release --parallel 2
+      - name: Run native tests
+        run: ctest --test-dir build-core -C Release --output-on-failure
