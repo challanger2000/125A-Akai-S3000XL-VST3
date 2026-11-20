@@ -37,6 +37,18 @@ Known limitations and development work (125A branch):
   See [P002 evidence and test contract](docs/P002-FIRMWARE-MONITOR.md).
 * Sample **loading** is slower than the hardware, a known cost of getting the transfer rate right.
 
+### 125A P003 – WAV input into the original Akai recorder
+
+On `develop/v1.0.0`, the MEDIA menu can select a WAV file and the panel accepts WAV drag/drop.
+Supported formats: PCM8/16/24/32 and float32, mono/stereo (8–192 kHz), with bounded sizes.
+The data is resampled off the audio thread and delivered only when the **original Akai firmware**
+starts recording (SAMPLE → REC → ARM → GO), through the original A/D and DMA chain.
+
+**Important:** This currently **prepares a waveform for native firmware capture**; it does NOT
+yet automatically create a sample/program/keygroup on one click, and it does NOT yet guarantee
+DAW project sample recall. Its source code is not a verified full Windows VST3 build.
+See [P003 evidence and limitations](docs/P003-WAV-ADC-IMPORT.md).
+
 Open items and the measurements behind every decision are tracked in [`STATE.json`](STATE.json).
 
 ---

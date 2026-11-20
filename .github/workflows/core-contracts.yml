@@ -6,12 +6,14 @@ on:
       - '.github/workflows/core-contracts.yml'
       - 'Source/AkaiAnalogControls.h'
       - 'Source/AkaiFirmwareMonitor.h'
+      - 'Source/AkaiWavInput.h'
       - 'tests/**'
   pull_request:
     paths:
       - '.github/workflows/core-contracts.yml'
       - 'Source/AkaiAnalogControls.h'
       - 'Source/AkaiFirmwareMonitor.h'
+      - 'Source/AkaiWavInput.h'
       - 'tests/**'
 permissions:
   contents: read

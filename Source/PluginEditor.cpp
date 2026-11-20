@@ -1427,9 +1427,48 @@ void EnsoniqSD1AudioProcessorEditor::paintAnalogKnobIndicators(juce::Graphics& g
     drawOne(39, 5263.4f, juce::Colour(0xffdfdfc6));
 }
 
+bool EnsoniqSD1AudioProcessorEditor::isInterestedInFileDrag(const juce::StringArray& files)
+{
+    if (isSettingsVisible || !audioProcessor.isMameRunningFlag()) return false;
+    for (const auto& path : files)
+        if (juce::File(path).hasFileExtension(".wav")) return true;
+    return false;
+}
+void EnsoniqSD1AudioProcessorEditor::filesDropped(const juce::StringArray& files,
+                                                   int, int)
+{
+    for (const auto& path : files)
+        if (juce::File(path).hasFileExtension(".wav")) {
+            importWavFile(juce::File(path));
+            return;
+        }
+}
+void EnsoniqSD1AudioProcessorEditor::importWavFile(const juce::File& file)
+{
+    juce::String error;
+    if (!audioProcessor.stageWavForCapture(file,error)) {
+        juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::WarningIcon,
+            "Akai WAV input",error);
+        return;
+    }
+    repaint();
+    juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::InfoIcon,
+        "WAV ready for original Akai recorder",
+        file.getFileName()
+        + "\n\nOn the Akai: SAMPLE > REC > ARM > GO.\n"
+          "The WAV starts on the original firmware's GO signal.\n"
+          "Program mapping and portable DAW sample recall are not yet implemented.");
+}
 void EnsoniqSD1AudioProcessorEditor::loadMediaButtonClicked()
 {
     juce::PopupMenu m;
+    m.addSectionHeader("WAV input via original Akai sampler");
+    m.addItem(20, "Load WAV for firmware sampling...");
+    if (audioProcessor.wavState.load(std::memory_order_acquire) != 0) {
+        m.addItem(21, "Unload staged WAV");
+        m.addSectionHeader("Staged: " + audioProcessor.stagedWavName);
+    }
+    m.addSeparator();
     m.addSectionHeader("Floppy  (removable - hot swap)");
     m.addItem(2, "Insert Floppy Image (.img, .hfe, .dsk)...");
     m.addItem(4, "Eject Floppy", audioProcessor.isFloppyLoaded.load(std::memory_order_acquire));
@@ -1442,66 +1481,92 @@ void EnsoniqSD1AudioProcessorEditor::loadMediaButtonClicked()
     m.addItem(8, "Set Hard Disk Image (.chd, .hd)...");
     m.addItem(9, "Remove Hard Disk", audioProcessor.isHddLoaded.load(std::memory_order_acquire));
 
+    juce::Component::SafePointer<EnsoniqSD1AudioProcessorEditor> safeThis(this);
     m.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(&loadMediaButton),
-        [this](int result) {
-            if (result == 0) return;
-
-            // --- Insert/Set image (floppy=2, cd=6, hdd=8) ---
-            if (result == 2 || result == 6 || result == 8) {
+        [safeThis](int result) {
+            if (safeThis == nullptr || result == 0) return;
+            auto* editor = safeThis.getComponent();
+            auto& processor = editor->audioProcessor;
+            if (result == 21) {
+                processor.clearStagedWav();
+                processor.stagedWavName.clear();
+                editor->repaint();
+                return;
+            }
+            if (result == 20 || result == 2 || result == 6 || result == 8) {
                 juce::String title, filter;
-                if      (result == 2) { title = "Select Floppy Image";   filter = "*.img;*.hfe;*.dsk;*.ima;*.imd;*.td0;*.ipf"; }
-                else if (result == 6) { title = "Select CD-ROM Image";   filter = "*.chd;*.cue;*.iso;*.toc;*.nrg;*.gdi"; }
-                else                  { title = "Select Hard Disk Image"; filter = "*.chd;*.hd;*.hdv;*.2mg;*.hdi"; }
-
-                juce::File initialDir = (audioProcessor.lastMediaFolder.isNotEmpty()
-                                         && juce::File(audioProcessor.lastMediaFolder).exists())
-                                        ? juce::File(audioProcessor.lastMediaFolder)
-                                        : juce::File::getSpecialLocation(juce::File::userHomeDirectory);
-
-                fileChooser = std::make_unique<juce::FileChooser>(title, initialDir, filter);
-                auto flags = juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles;
-                fileChooser->launchAsync(flags, [this, result](const juce::FileChooser& fc) {
-                    auto file = fc.getResult();
+                if (result == 20) {
+                    title="Select WAV for Akai original firmware sampling";
+                    filter="*.wav;*.WAV";
+                } else if (result == 2) {
+                    title="Select Floppy Image";filter="*.img;*.hfe;*.dsk;*.ima;*.imd;*.td0;*.ipf";
+                } else if (result == 6) {
+                    title="Select CD-ROM Image";filter="*.chd;*.cue;*.iso;*.toc;*.nrg;*.gdi";
+                } else {
+                    title="Select Hard Disk Image";filter="*.chd;*.hd;*.hdv;*.2mg;*.hdi";
+                }
+                const juce::File initialDir = (processor.lastMediaFolder.isNotEmpty()
+                    && juce::File(processor.lastMediaFolder).exists())
+                    ? juce::File(processor.lastMediaFolder)
+                    : juce::File::getSpecialLocation(juce::File::userHomeDirectory);
+                editor->fileChooser=std::make_unique<juce::FileChooser>(title,initialDir,filter);
+                const auto flags=juce::FileBrowserComponent::openMode
+                    | juce::FileBrowserComponent::canSelectFiles;
+                editor->fileChooser->launchAsync(flags,[safeThis,result](const juce::FileChooser& fc) {
+                    if (safeThis == nullptr) return;
+                    auto* e=safeThis.getComponent();
+                    const auto file=fc.getResult();
                     if (!file.existsAsFile()) return;
-                    audioProcessor.lastMediaFolder = file.getParentDirectory().getFullPathName();
+                    if (result==20) {
+                        e->importWavFile(file);
+                        return;
+                    }
+                    auto& p=e->audioProcessor;
+                    p.lastMediaFolder=file.getParentDirectory().getFullPathName();
                 #ifdef _WIN32
-                    std::string path = file.getFullPathName().toUTF8().getAddress();
+                    std::string path=file.getFullPathName().toUTF8().getAddress();
                 #else
-                    std::string path = file.getFullPathName().toStdString();
+                    std::string path=file.getFullPathName().toStdString();
                 #endif
                     {
-                        std::lock_guard<std::mutex> lock(audioProcessor.mediaMutex);
-                        if (result == 2)      { audioProcessor.pendingFloppyPath = path; audioProcessor.loadedFloppyName = file.getFileName(); audioProcessor.isFloppyLoaded.store(true, std::memory_order_release); }
-                        else if (result == 6) { audioProcessor.pendingCdPath     = path; audioProcessor.loadedCdName     = file.getFileName(); audioProcessor.isCdLoaded.store(true, std::memory_order_release); }
-                        else                  { audioProcessor.pendingHddPath    = path; audioProcessor.loadedHddName    = file.getFileName(); audioProcessor.isHddLoaded.store(true, std::memory_order_release); }
+                        std::lock_guard<std::mutex> lock(p.mediaMutex);
+                        if (result==2) {
+                            p.pendingFloppyPath=path;p.loadedFloppyName=file.getFileName();
+                            p.isFloppyLoaded.store(true,std::memory_order_release);
+                        } else if (result==6) {
+                            p.pendingCdPath=path;p.loadedCdName=file.getFileName();
+                            p.isCdLoaded.store(true,std::memory_order_release);
+                        } else {
+                            p.pendingHddPath=path;p.loadedHddName=file.getFileName();
+                            p.isHddLoaded.store(true,std::memory_order_release);
+                        }
                     }
-                    saveGlobalSettings();
-                    if      (result == 2) audioProcessor.requestFloppyLoad.store(true, std::memory_order_release);   // hot
-                    else if (result == 6) { audioProcessor.shutdownMame(); audioProcessor.checkRomAndBootMame(); } // CD: reboot so the firmware SCSI scan finds the disc
-                    else { audioProcessor.shutdownMame(); audioProcessor.checkRomAndBootMame(); }                    // HDD: reboot so the SCSI scan finds it
-                    repaint();
+                    e->saveGlobalSettings();
+                    if (result==2) p.requestFloppyLoad.store(true,std::memory_order_release);
+                    else {p.shutdownMame();p.checkRomAndBootMame();}
+                    e->repaint();
                 });
+                return;
             }
-            else if (result == 4) { // eject floppy (hot)
-                { std::lock_guard<std::mutex> lock(audioProcessor.mediaMutex);
-                  audioProcessor.pendingFloppyPath = ""; audioProcessor.loadedFloppyName = ""; audioProcessor.isFloppyLoaded.store(false, std::memory_order_release); }
-                audioProcessor.requestFloppyLoad.store(true, std::memory_order_release);
-                repaint();
+            if (result==4) {
+                {std::lock_guard<std::mutex> lock(processor.mediaMutex);
+                 processor.pendingFloppyPath="";processor.loadedFloppyName="";
+                 processor.isFloppyLoaded.store(false,std::memory_order_release);}
+                processor.requestFloppyLoad.store(true,std::memory_order_release);
+            } else if (result==7) {
+                {std::lock_guard<std::mutex> lock(processor.mediaMutex);
+                 processor.pendingCdPath="";processor.loadedCdName="";
+                 processor.isCdLoaded.store(false,std::memory_order_release);}
+                editor->saveGlobalSettings();
+                processor.shutdownMame();processor.checkRomAndBootMame();
+            } else if (result==9) {
+                {std::lock_guard<std::mutex> lock(processor.mediaMutex);
+                 processor.pendingHddPath="";processor.loadedHddName="";
+                 processor.isHddLoaded.store(false,std::memory_order_release);}
+                editor->saveGlobalSettings();
+                processor.shutdownMame();processor.checkRomAndBootMame();
             }
-            else if (result == 7) { // eject CD (hot)
-                { std::lock_guard<std::mutex> lock(audioProcessor.mediaMutex);
-                  audioProcessor.pendingCdPath = ""; audioProcessor.loadedCdName = ""; audioProcessor.isCdLoaded.store(false, std::memory_order_release); }
-                saveGlobalSettings();
-                audioProcessor.shutdownMame(); audioProcessor.checkRomAndBootMame(); // CD eject: reboot
-                repaint();
-            }
-            else if (result == 9) { // remove HDD (reboot)
-                { std::lock_guard<std::mutex> lock(audioProcessor.mediaMutex);
-                  audioProcessor.pendingHddPath = ""; audioProcessor.loadedHddName = ""; audioProcessor.isHddLoaded.store(false, std::memory_order_release); }
-                saveGlobalSettings();
-                audioProcessor.shutdownMame(); audioProcessor.checkRomAndBootMame();
-                repaint();
-            }
+            editor->repaint();
         });
 }
 

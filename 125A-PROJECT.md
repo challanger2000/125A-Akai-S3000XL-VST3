@@ -42,6 +42,13 @@ The **user-facing workflow should match the Emulator II/III**: directly choose/l
 - The upstream save-state code visibly serializes SD-1 `osram`/`seqram` shares; that is **not a proof** S3000XL sample RAM and programs are restored correctly. True sample/project recall is a priority.
 - MAME global process state may prevent safe simultaneous VST instances, as upstream port notes warn. Verify, do not assume.
 
+## P003 WAV source through original Akai ADC (implemented, not one-click yet)
+- WAV selection (MEDIA menu) and editor drag/drop implemented on `develop/v1.0.0`.
+- Supports RIFF/WAVE PCM 8/16/24/32, float32, mono/stereo, 8–192 kHz, bounded source sizes, no external conversion program. Transforms the decoded audio **off-thread** into host-rate PCM16 using a 32-tap windowed-sinc converter; no normalization or boosts.
+- Dedicated immutable two-slot feeder and original firmware `WADCS` bit-3 **GO/STOP** trigger in MAME's existing microphone source callback, preserving the original 44.1-kHz ADC/DMA sample path and applying the physical REC GAIN to WAV capture. No direct guest sample-RAM writes.
+- **Explicit user interaction remains:** original SAMPLE → REC → ARM → GO and native Akai sample/program allocation. A one-click firmware capture/program/keygroup workflow is still **NOT implemented**, and DAW portable sample recall is still **NOT implemented**.
+- See `docs/P003-WAV-ADC-IMPORT.md` and `tests/AkaiWavInputTests.cpp` for implementation boundaries and test cases. No original-ROM/Windows VST3/DAW pass is claimed.
+
 ## P002 original-firmware MON bridge (candidate, not accepted)
 - The original Akai V2.0 firmware physically controls RECORD page **MON/Moff** and auto-enables on ARM and disables after a completed recording. **Do not add an invented GUI monitor toggle.**
 - Original project recordings measured WADCS control port `0x00C0` sequence `A2` idle, `82` ARM, `8A` mono GO, `9A` stereo GO, `A2` STOP. Port bit 3 is verified record strobe, bit 4 is verified stereo; bit 5 is only a candidate for the MON inhibit, not yet verified by a MON↔Moff toggle.
@@ -62,7 +69,7 @@ The **user-facing workflow should match the Emulator II/III**: directly choose/l
 ## Development order (owner priority, 2026-11-20)
 1. Implement both physically present knobs, **REC GAIN and MAIN VOLUME**, and their actual input/Main L/R audio signal effects. **P001 source written; isolated C++ checks PASS; Windows/host gates OPEN.**
 2. Complete the original firmware **Mon** function and outstanding first-stereo-record monitoring anomaly; **P002 gated source bridge implemented, firmware/DAW validation OPEN**. Keep native firmware display and behavior.
-3. Implement **one-step direct WAV import** consistent with the user's Emulator II/III workflow, using original Akai firmware registration/processing rather than silent RAM bypass.
+3. Complete **one-step direct WAV import** consistent with Emulator II/III: **P003 source loader plus firmware-GO ADC feeder coded; automatic firmware capture, Akai program/keygroup assignment, original-ROM proof and DAW sample recall still OPEN.**
 4. Reproduce a native Windows x64 VST3 build with JUCE, MAME 0.288 and VS2022; replace upstream absolute F: drive paths and integrate private ROMs outside the public Git repository.
 5. Demonstrate firmware V2.0 boot, MIDI and 10 output buses, genuine recording/playback and WAV import. Validate real 32 MiB RAM, true project/sample recall and concurrent instances.
 6. Optimize sample load speed and realtime/host reliability without changing the original Akai sound path without evidence.
@@ -87,4 +94,4 @@ The **user-facing workflow should match the Emulator II/III**: directly choose/l
 - Revision: `d4a5042dffa26fd833eafae5c0cc9d26e69ef99e`
 - License: GPLv3, see `LICENSE`
 
-**Current development status:** P001 analogue controls plus P002 firmware-WADCS monitor bridge coded in `develop/v1.0.0`. The MON bit-5 meaning is provisional until ROM-backed switching is observed; Windows VST3 build, integrated audio and DAW acceptance remain NOT RUN. Upstream import is preserved on `main`.
+**Current development status:** P001 analogue knobs, P002 candidate MON bridge, P003 direct WAV selection/ADC feeder in `develop/v1.0.0`. One-click firmware sample allocation, full Windows VST3 build, integrated ROM-backed audio and DAW acceptance remain OPEN. MON bit 5 unverified. Upstream import preserved on `main`.

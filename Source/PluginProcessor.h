@@ -38,6 +38,8 @@
 #include <atomic>
 #include <cstdint>
 #include <mutex>
+#include <memory>
+#include "AkaiWavInput.h"
 
 //==============================================================================
 
@@ -321,7 +323,15 @@ public:
     static constexpr int SAMPLER_IN_FRAMES = 1 << 18;          // 262144 frames, ~5.9 s at 44100
     static constexpr int SAMPLER_IN_CHANNELS = 2;
     void pushAudioToMame(const juce::AudioBuffer<float>& buffer, int numInputChannels, int numSamples);
-    int  pullAudioForMame(int16_t* dest, int frames);           // returns frames actually supplied
+    int  pullAudioForMame(int16_t* dest, int frames);
+    // WAV is decoded and converted on the UI/control thread, then streamed
+    // through the MAME microphone/A-D path only AFTER original firmware GO.
+    // Double-buffered immutable assets; no locks/allocations on MAME/audio threads.
+    bool stageWavForCapture(const juce::File& file, juce::String& error);
+    void clearStagedWav() noexcept;
+    juce::String stagedWavName;
+    std::atomic<int> wavState{0}; // 0 none, 1 armed, 2 recording, 3 source finished
+    std::atomic<std::uint64_t> wavFramesDelivered{0};           // returns frames actually supplied
     uint64_t getSamplerInWritten() const { return samplerInWritten.load(std::memory_order_acquire); }
     uint64_t getSamplerInRead()    const { return samplerInRead.load(std::memory_order_acquire); }
 
@@ -460,6 +470,19 @@ private:
 
     // [SAMPLING] input ring: interleaved stereo int16, the format MAME's source stream wants
     int16_t samplerInRing[SAMPLER_IN_FRAMES * SAMPLER_IN_CHANNELS] = { 0 };
+    // GUI writes only an inactive slot; MAME consumes only the committed slot.
+    // Slot switch is acknowledged before GUI may reuse the retired slot.
+    std::unique_ptr<akai::wav::Prepared> wavSlots[2];
+    std::mutex wavStageMutex; // UI/control thread only, NEVER the engine or audio thread
+    std::atomic<int> wavPendingSlot{-1};
+    std::atomic<int> wavCurrentSlot{-1};
+    akai::wav::Feed wavFeed;  // engine thread only
+    std::atomic<std::uint32_t> wavStagedGoSerial{0}; // stage-time baseline, UI -> MAME
+    float wavSmoothedGain=1.0f; // MAME thread only, separate from audio-thread gain
+    std::atomic<std::uint32_t> wavGoSerial{0};
+    std::atomic<std::uint32_t> wavStopSerial{0};
+    std::uint32_t wavSeenGo=0, wavSeenStop=0; // engine thread only
+    std::atomic<bool> wavClearPending{false};
     std::atomic<uint64_t> samplerInWritten{ 0 };   // frames written by the audio thread
     std::atomic<uint64_t> samplerInRead{ 0 };      // frames consumed by the MAME thread
     std::atomic<uint64_t> samplerInUnderruns{ 0 }; // frames MAME asked for that we could not supply

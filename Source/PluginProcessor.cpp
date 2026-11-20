@@ -186,6 +186,65 @@ void EnsoniqSD1AudioProcessor::pushAudioToMame(const juce::AudioBuffer<float>& b
     samplerInWritten.store(w + numSamples, std::memory_order_release);
 }
 
+
+// P003: transactional WAV staging. The UI/control thread is the only writer
+// and all file I/O/decoding/resampling/allocation is confined to this call.
+bool EnsoniqSD1AudioProcessor::stageWavForCapture(const juce::File& file,
+                                                   juce::String& error)
+{
+    if (!file.existsAsFile()) {error="The WAV file does not exist.";return false;}
+    const auto length=file.getSize();
+    if (length<44 || length>static_cast<juce::int64>(akai::wav::maxFileBytes)) {
+        error="The WAV must be 44 bytes to 64 MiB in size.";return false;
+    }
+    // Do not read/decode during playback or before engine readiness changes the
+    // accepted ROM state. The staged sample is only fed on a real firmware GO.
+    if (wavPendingSlot.load(std::memory_order_acquire)!=-1
+        || wavClearPending.load(std::memory_order_acquire)) {
+        error="An earlier WAV request is still being activated.";return false;
+    }
+    try {
+        juce::FileInputStream stream(file);
+        if (stream.failedToOpen()) {error="Could not open WAV file.";return false;}
+        std::vector<std::uint8_t> bytes(static_cast<std::size_t>(length));
+        if (stream.read(bytes.data(),int(bytes.size()))!=int(bytes.size())) {
+            error="Incomplete WAV file read.";return false;
+        }
+        const auto audio=akai::wav::decode(bytes);
+        const auto rate=static_cast<std::uint32_t>(std::lround(
+            hostSampleRate.load(std::memory_order_acquire)));
+        auto prepared=std::make_unique<akai::wav::Prepared>(
+            akai::wav::prepare(audio,rate));
+        // Never write the slot currently used by MAME. Keep both slots alive
+        // until a switch is acknowledged; no shared_ptr atomics on RT threads.
+        std::lock_guard<std::mutex> lock(wavStageMutex);
+        if (wavPendingSlot.load(std::memory_order_acquire)!=-1
+            || wavClearPending.load(std::memory_order_acquire)) {
+            error="WAV activation is still pending.";return false;
+        }
+        const int inactive=wavCurrentSlot.load(std::memory_order_acquire)==0?1:0;
+        wavSlots[inactive]=std::move(prepared);
+        stagedWavName=file.getFileName();
+        wavFramesDelivered.store(0,std::memory_order_release);
+        wavState.store(1,std::memory_order_release);
+        // Capture the firmware event counter before publishing the asset:
+        // GO between GUI publication and engine acceptance must not be lost.
+        wavStagedGoSerial.store(wavGoSerial.load(std::memory_order_acquire),
+                                std::memory_order_release);
+        wavPendingSlot.store(inactive,std::memory_order_release);
+        return true;
+    } catch(const std::exception& e) {
+        error=juce::String(e.what());
+        return false;
+    }
+}
+void EnsoniqSD1AudioProcessor::clearStagedWav() noexcept
+{
+    // Old immutable assets are not deleted until a future UI-stage overwrite
+    // or processor destruction, when MAME is no longer using their memory.
+    wavClearPending.store(true,std::memory_order_release);
+}
+
 int EnsoniqSD1AudioProcessor::pullAudioForMame(int16_t* dest, int frames)
 {
     if (dest == nullptr || frames <= 0)
@@ -322,6 +381,70 @@ int EnsoniqSD1AudioProcessor::pullAudioForMame(int16_t* dest, int frames)
     }
 
     samplerInRead.store(r + have + adjust, std::memory_order_release);
+
+    // The MAME input callback owns this live WAV feeder. No host callback,
+    // UI thread or timer drives its playback and there is no filesystem work.
+    if (wavClearPending.exchange(false,std::memory_order_acq_rel)) {
+        wavFeed.assign(nullptr);
+        wavCurrentSlot.store(-1,std::memory_order_release);
+        wavState.store(0,std::memory_order_release);
+        wavPendingSlot.store(-1,std::memory_order_release);
+        wavSeenGo=wavGoSerial.load(std::memory_order_acquire);
+        wavSeenStop=wavStopSerial.load(std::memory_order_acquire);
+    } else {
+        const int requested=wavPendingSlot.load(std::memory_order_acquire);
+        if (requested>=0 && requested<=1) {
+            wavFeed.assign(wavSlots[requested].get());
+            wavSeenGo=wavStagedGoSerial.load(std::memory_order_acquire);
+            wavSeenStop=wavStopSerial.load(std::memory_order_acquire);
+            wavSmoothedGain=recGainParameter
+                ? AkaiAnalogControls::normalized(recGainParameter->load(std::memory_order_relaxed))
+                : 1.0f;
+            wavCurrentSlot.store(requested,std::memory_order_release);
+            wavState.store(1,std::memory_order_release); // accepted/armed
+            wavPendingSlot.store(-1,std::memory_order_release); // acknowledge
+        }
+    }
+    const auto stop=wavStopSerial.load(std::memory_order_acquire);
+    if(stop!=wavSeenStop) {
+        wavSeenStop=stop;
+        wavFeed.stop();
+        if(wavCurrentSlot.load(std::memory_order_acquire)>=0)
+            wavState.store(1,std::memory_order_release); // can retry firmware REC
+    }
+    const auto go=wavGoSerial.load(std::memory_order_acquire);
+    if(go!=wavSeenGo) {
+        wavSeenGo=go;
+        // If GO and STOP happened between two input pulls, fail closed
+        // rather than starting a sample after the firmware has stopped.
+        if((firmwareWadcsLatch.load(std::memory_order_acquire) & 0x08)!=0
+            && wavCurrentSlot.load(std::memory_order_acquire)>=0) {
+            wavFeed.start(); // FIRST original firmware GO, never on file load
+            wavFramesDelivered.store(0,std::memory_order_release);
+            wavState.store(2,std::memory_order_release);
+        }
+    }
+    if(wavFeed.render(dest,frames)) {
+        // This is the original A/D input, not sample RAM. Apply REC GAIN
+        // to imported audio as well; independent gain smoothing belongs to
+        // the MAME thread so it cannot race the host's audio callback.
+        const float captureGain=recGainParameter
+            ? AkaiAnalogControls::normalized(recGainParameter->load(std::memory_order_relaxed))
+            : 1.0f;
+        const float step=AkaiAnalogControls::smoothingCoefficient(
+            static_cast<float>(hostSampleRate.load(std::memory_order_relaxed)));
+        for(int i=0;i<frames;++i) {
+            wavSmoothedGain=AkaiAnalogControls::smooth(wavSmoothedGain,captureGain,step);
+            for(int ch=0;ch<SAMPLER_IN_CHANNELS;++ch) {
+                const auto at=i*SAMPLER_IN_CHANNELS+ch;
+                dest[at]=static_cast<int16_t>(std::clamp(
+                    std::lround(double(dest[at])*wavSmoothedGain),-32768l,32767l));
+            }
+        }
+        wavFramesDelivered.store(static_cast<uint64_t>(wavFeed.position()),std::memory_order_release);
+        if(wavFeed.complete())wavState.store(3,std::memory_order_release);
+        return frames;
+    }
     return have;
 }
 
@@ -3217,9 +3340,15 @@ void EnsoniqSD1AudioProcessor::mameOutputNotifier(const char *outname, s32 value
 
     // WADCS hardware latch forwarded by the patched S3000XL MAME driver.
     if (strcmp(outname, "s3000xl_wadcs") == 0) {
-        processor->firmwareWadcsLatch.store(static_cast<std::uint8_t>(value & 0xff),
-                                           std::memory_order_release);
-        processor->firmwareWadcsKnown.store(true, std::memory_order_release);
+        const auto next=static_cast<std::uint8_t>(value & 0xff);
+        const auto old=processor->firmwareWadcsLatch.exchange(next,std::memory_order_acq_rel);
+        processor->firmwareWadcsKnown.store(true,std::memory_order_release);
+        if (((old ^ next) & 0x08)!=0) {
+            if ((next & 0x08)!=0)
+                processor->wavGoSerial.fetch_add(1,std::memory_order_release);
+            else
+                processor->wavStopSerial.fetch_add(1,std::memory_order_release);
+        }
     }
     else if (strcmp(outname, "lights") == 0) {
         processor->ledStateMask.store(static_cast<uint32_t>(value), std::memory_order_relaxed);
