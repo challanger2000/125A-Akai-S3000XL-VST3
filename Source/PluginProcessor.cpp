@@ -17,6 +17,9 @@
 #ifdef AKAI_EMBED_PRIVATE_ROMS
 #include "AkaiPrivateRomData.h" // generated LOCAL-only, not stored in GitHub
 #endif
+#ifdef AKAI_RUNTIME_ROM_OVERLAY
+#include "AkaiPrivateRomOverlay.h" // no ROM data in public source/binary
+#endif
 
 #include <iostream>
 #include <chrono>
@@ -3280,6 +3283,18 @@ void EnsoniqSD1AudioProcessor::checkRomAndBootMame()
         missingFilesList.add("Private ROM extraction or verification failed.");
         return;
     }
+#elif defined(AKAI_RUNTIME_ROM_OVERLAY)
+    // Binary overlay mode: local packer appends verified owner ROMs to THIS
+    // Windows DLL. No separate ROM files are needed at deployment.
+    // This ROM-free CI build deliberately fails closed until privately packed.
+    if (!akai::private_overlay::stageForOriginalMame(juce::File(instanceTempDir))) {
+        isRomMissing.store(true,std::memory_order_release);
+        isRomInvalid.store(true,std::memory_order_release);
+        isMameRunning.store(false,std::memory_order_release);
+        missingFilesList.clear();
+        missingFilesList.add("Private original Akai ROMs are not embedded.");
+        return;
+    }
 #else
     // --- 0. LEGACY FALLBACK (for ROM-free public diagnostic build) ---
     // Keep the original manual ROM selection behavior, but it is NOT the
@@ -3331,7 +3346,7 @@ void EnsoniqSD1AudioProcessor::checkRomAndBootMame()
 bool EnsoniqSD1AudioProcessor::verifyRomFiles()
 {
     missingFilesList.clear();
-#ifdef AKAI_EMBED_PRIVATE_ROMS
+#if defined(AKAI_EMBED_PRIVATE_ROMS) || defined(AKAI_RUNTIME_ROM_OVERLAY)
     juce::File sd132Dir = juce::File(instanceTempDir).getChildFile("ROMs").getChildFile("s3000xl");
 #else
     juce::File sd132Dir = juce::File::getSpecialLocation(juce::File::userDocumentsDirectory)
@@ -3542,7 +3557,7 @@ void EnsoniqSD1AudioProcessor::runMameEngine()
     args.push_back("s3000xl");
     
     // --- 2. ROM PATH CONFIGURATION ---
-#ifdef AKAI_EMBED_PRIVATE_ROMS
+#if defined(AKAI_EMBED_PRIVATE_ROMS) || defined(AKAI_RUNTIME_ROM_OVERLAY)
     // Only our short-lived per-instance extraction folder is visible to MAME.
     juce::File romsDir=juce::File(instanceTempDir).getChildFile("ROMs");
 #else

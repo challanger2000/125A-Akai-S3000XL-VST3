@@ -84,6 +84,7 @@ target_sources(AkaiS3000XL PRIVATE
 )
 target_compile_features(AkaiS3000XL PRIVATE cxx_std_20)
 target_compile_definitions(AkaiS3000XL PRIVATE
+    AKAI_RUNTIME_ROM_OVERLAY=1
     JUCE_WEB_BROWSER=0
     JUCE_USE_CURL=0
     JUCE_USE_FLAC=0
@@ -135,6 +136,7 @@ foreach(lib IN LISTS _akai_mame_libs)
 endforeach()
 target_link_libraries(AkaiS3000XL PRIVATE
     AkaiOpenResources
+    juce::juce_cryptography
     juce::juce_audio_utils
     juce::juce_audio_formats
     juce::juce_audio_devices
