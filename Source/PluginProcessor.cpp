@@ -13,6 +13,7 @@
 #include "AkaiFirmwareMonitor.h"
 #include "video/hd61830.h"
 #include "PluginEditor.h"
+#include "BinaryData.h" // MAME layout plugin packaged from official MAME source
 
 #include <iostream>
 #include <chrono>

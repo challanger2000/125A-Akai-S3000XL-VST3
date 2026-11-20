@@ -14,3 +14,11 @@
 Builds/
 JuceLibraryCode/
 .vs/
+
+# Reproducible MAME/JUCE source checkouts and generated private build inputs
+external/
+build/
+out/
+*.vst3/
+Source/AkaiPrivateRomData.h
+Source/AkaiPrivateRomData.cpp

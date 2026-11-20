@@ -11,6 +11,7 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
 #include "mpc_clickmap.h"
+#include "BinaryData.h" // Small icons generated locally; original MAME GUI remains
 
 EnsoniqSD1AudioProcessorEditor::EnsoniqSD1AudioProcessorEditor (EnsoniqSD1AudioProcessor& p)
     : AudioProcessorEditor (&p), audioProcessor (p), presetBrowser (p)
@@ -657,7 +658,7 @@ void EnsoniqSD1AudioProcessorEditor::paint (juce::Graphics& g)
                 false); 
 
     // ==============================================================================
-    // --- 2. JUCE PNG LABELS OVERLAY (Top Layer: Transparent decal over the machine)
+    // --- 2. Optional former SD-1 decals absent; use ORIGINAL Akai MAME artwork ---
     // ==============================================================================
     int viewIdx = audioProcessor.requestedViewIndex.load(std::memory_order_acquire);
     if (viewIdx == 4) {
@@ -667,13 +668,13 @@ void EnsoniqSD1AudioProcessorEditor::paint (juce::Graphics& g)
 
     // Index Mapping: 0 = Compact, 1 = Full, 2 = Rack, 3 = Tablet
     if (viewIdx == 0) {
-        overlayImage = juce::ImageCache::getFromMemory(BinaryData::labels_compact_png, BinaryData::labels_compact_pngSize);
+        overlayImage = juce::Image{};
     } else if (viewIdx == 1) {
-        overlayImage = juce::ImageCache::getFromMemory(BinaryData::labels_full_png, BinaryData::labels_full_pngSize);
+        overlayImage = juce::Image{};
     } else if (viewIdx == 2) {
-        overlayImage = juce::ImageCache::getFromMemory(BinaryData::labels_rack_png, BinaryData::labels_rack_pngSize);
+        overlayImage = juce::Image{};
     } else if (viewIdx == 3) {
-        overlayImage = juce::ImageCache::getFromMemory(BinaryData::labels_tablet_png, BinaryData::labels_tablet_pngSize);
+        overlayImage = juce::Image{};
     } else if (viewIdx == 4) {
         float totalBaseH = 925.0f + 379.0f;
                 int fmHeight = juce::roundToInt(getHeight() * (925.0f / totalBaseH));
@@ -685,7 +686,7 @@ void EnsoniqSD1AudioProcessorEditor::paint (juce::Graphics& g)
                             audioProcessor.screenBuffers[readIndex].getHeight());
 
                 // Rajzoljuk rá a Rack feliratokat (decal)
-                auto overlayImage = juce::ImageCache::getFromMemory(BinaryData::labels_rack_png, BinaryData::labels_rack_pngSize);
+                auto overlayImage = juce::Image{};
                 if (overlayImage.isValid()) {
                     g.drawImage(overlayImage, 0, fmHeight, getWidth(), rackHeight, 0, 0, 2048, 379, false);
                 }
@@ -917,13 +918,13 @@ void EnsoniqSD1AudioProcessorEditor::paint (juce::Graphics& g)
 
     // Index Mapping: 0 = Compact, 1 = Full, 2 = Rack, 3 = Tablet
     if (viewIdx == 0) {
-        overlayImage = juce::ImageCache::getFromMemory(BinaryData::labels_compact_png, BinaryData::labels_compact_pngSize);
+        overlayImage = juce::Image{};
     } else if (viewIdx == 1) {
-        overlayImage = juce::ImageCache::getFromMemory(BinaryData::labels_full_png, BinaryData::labels_full_pngSize);
+        overlayImage = juce::Image{};
     } else if (viewIdx == 2) {
-        overlayImage = juce::ImageCache::getFromMemory(BinaryData::labels_rack_png, BinaryData::labels_rack_pngSize);
+        overlayImage = juce::Image{};
     } else if (viewIdx == 3) {
-        overlayImage = juce::ImageCache::getFromMemory(BinaryData::labels_tablet_png, BinaryData::labels_tablet_pngSize);
+        overlayImage = juce::Image{};
     } else if (viewIdx == 4) {
         
         // HIBRID NÉZET: File Manager felül, Rack panel alul
@@ -939,7 +940,7 @@ void EnsoniqSD1AudioProcessorEditor::paint (juce::Graphics& g)
                             false);
 
                 // Rajzoljuk rá a Rack feliratokat (decal)
-                auto rackOverlay = juce::ImageCache::getFromMemory(BinaryData::labels_rack_png, BinaryData::labels_rack_pngSize);
+                auto rackOverlay = juce::Image{};
                 if (rackOverlay.isValid()) {
                     g.drawImage(rackOverlay, 0, fmHeight, getWidth(), rackHeight, 0, 0, 2048, 379, false);
                 }

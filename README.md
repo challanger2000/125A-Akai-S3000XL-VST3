@@ -82,6 +82,33 @@ A quick way to verify your set is complete is to run a standalone MAME with the 
 
 ---
 
+## 125A native Windows build (develop/v1.0.0)
+
+**New reproducible build path:** `CMakeLists.txt` and
+[`windows-full-vst3.yml`](.github/workflows/windows-full-vst3.yml) use
+a fresh **official MAME 0.288** checkout (with this project's patch), pinned
+**JUCE 8.0.12**, Visual Studio 2022, and the Windows x64 MAME static libraries.
+
+The build no longer needs the upstream author's `F:\\MPC3000vsti` folder.
+`scripts/build/generate_open_resources.py` prepares a minimal layout-plugin
+archive from original GPL-compatible MAME Lua files and two small locally-drawn
+media icons. It never downloads, embeds, tests or publishes an Akai ROM.
+The original on-screen Akai panel comes from MAME. Old optional Ensoniq
+label-overlays were not checked in by upstream and are intentionally disabled
+rather than fabricated.
+
+The uploaded CI artifact is **ROM-FREE and intended only for compilation/
+linking diagnostics**, not as the user's final VST3. The private, ROM-embedded
+VST3 remains a distinct build requirement; sample-recall, ROM boot, MIDI,
+GUI and audio tests are still required before acceptance.
+
+To build locally from a patched MAME tree with Release/x64 MAME libraries:
+
+```powershell
+cmake -S . -B build/windows -G "Visual Studio 17 2022" -A x64 -DAKAI_MAME_ROOT="C:/mame0288" -DAKAI_JUCE_ROOT="C:/JUCE-8.0.12"
+cmake --build build/windows --config Release --target AkaiS3000XL_VST3
+```
+
 ## Build
 
 Prerequisites: MSYS2 (MinGW64) for GENie, Visual Studio 2022 Build Tools, and JUCE.

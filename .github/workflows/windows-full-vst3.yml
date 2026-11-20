@@ -1,0 +1,93 @@
+name: 125A Akai - full Windows VST3 ROM-free build
+on:
+  workflow_dispatch:
+  push:
+    branches: [ 'develop/**' ]
+    paths:
+      - 'CMakeLists.txt'
+      - 'Source/**'
+      - 'mame-0288-s3000xl-vst.patch'
+      - 'scripts/build/**'
+      - '.github/workflows/windows-full-vst3.yml'
+permissions:
+  contents: read
+concurrency:
+  group: akai-vst3-windows-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  full-vst3:
+    runs-on: windows-2022
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install MAME 0.288 build prerequisites
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: false
+          install: >-
+            git make python
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-pkgconf
+      - name: Checkout pinned MAME + JUCE, verify and apply patch
+        shell: pwsh
+        run: |
+          git clone --filter=blob:none --depth 1 --branch mame0288 https://github.com/mamedev/mame.git external/mame
+          if ($LASTEXITCODE -ne 0) { throw "MAME clone failed" }
+          git clone --filter=blob:none --depth 1 --branch 8.0.12 https://github.com/juce-framework/JUCE.git external/JUCE
+          if ($LASTEXITCODE -ne 0) { throw "JUCE clone failed" }
+          git -C external/mame apply --check "$env:GITHUB_WORKSPACE/mame-0288-s3000xl-vst.patch"
+          if ($LASTEXITCODE -ne 0) { throw "MAME patch is not applicable" }
+          git -C external/mame apply "$env:GITHUB_WORKSPACE/mame-0288-s3000xl-vst.patch"
+          if ($LASTEXITCODE -ne 0) { throw "MAME patch application failed" }
+      - name: Create verified open-source layout resources
+        shell: pwsh
+        run: |
+          python scripts/build/generate_open_resources.py --mame-root external/mame --out build/resource-proof
+          if ($LASTEXITCODE -ne 0) { throw "Failed to generate MAME layout resources" }
+      - name: Generate native VS2022 projects for MAME
+        shell: msys2 {0}
+        working-directory: external/mame
+        run: |
+          export OS=Windows_NT
+          make vs2022 SUBTARGET=s3000xl SOURCES=src/mame/akai/s3000.cpp NOWERROR=1 -j2
+      - name: Compile full MAME static libraries
+        shell: pwsh
+        run: |
+          $vswhere = 'C:/Program Files (x86)/Microsoft Visual Studio/Installer/vswhere.exe'
+          $vs = & $vswhere -latest -products '*' -requires Microsoft.Component.MSBuild -property installationPath
+          if (-not $vs) { throw "Visual Studio 2022 not installed" }
+          $msbuild = Join-Path $vs 'MSBuild/Current/Bin/MSBuild.exe'
+          $solution = 'external/mame/build/projects/windows/mames3000xl/vs2022/mames3000xl.sln'
+          if (-not (Test-Path $solution)) { throw "MAME VS2022 solution not generated: $solution" }
+          $env:_CL_='/U_WIN32_WINNT /UNTDDI_VERSION /D_WIN32_WINNT=0x0A00 /DNTDDI_VERSION=0x0A000000'
+          & $msbuild $solution '/p:Configuration=Release' '/p:Platform=x64' '/p:PreferredToolArchitecture=x64' '/m:2' '/v:minimal' '/nologo'
+          $code=$LASTEXITCODE
+          Remove-Item Env:_CL_ -ErrorAction SilentlyContinue
+          if ($code -ne 0) { throw "MAME static library compilation failed: $code" }
+      - name: Configure original-MAME/JUCE Windows VST3
+        shell: pwsh
+        run: |
+          cmake -S . -B build/windows -G 'Visual Studio 17 2022' -A x64 -DAKAI_MAME_ROOT="$env:GITHUB_WORKSPACE/external/mame" -DAKAI_JUCE_ROOT="$env:GITHUB_WORKSPACE/external/JUCE"
+          if ($LASTEXITCODE -ne 0) { throw "VST3 CMake configure failed" }
+      - name: Compile full Windows VST3 (ROM-free public test)
+        shell: pwsh
+        run: |
+          cmake --build build/windows --config Release --target AkaiS3000XL_VST3 --parallel 2
+          if ($LASTEXITCODE -ne 0) { throw "Actual Windows VST3 compile/link failed" }
+      - name: Confirm build output exists
+        shell: pwsh
+        run: |
+          $bundle=Get-ChildItem 'build/windows' -Directory -Recurse -Filter '*.vst3' | Select-Object -First 1
+          if (-not $bundle) { throw 'VST3 bundle not created' }
+          $vst3=Get-ChildItem $bundle.FullName -Recurse -File -Filter '*.vst3' | Select-Object -First 1
+          if (-not $vst3) { throw 'No VST3 module binary inside bundle' }
+          Write-Output "WINDOWS_VST3_LINK=PASS ROM_BYTES_IN_CI=NONE BUNDLE=$($bundle.FullName)"
+      - name: Upload public ROM-free diagnostic build only
+        uses: actions/upload-artifact@v4
+        with:
+          name: 125A-Akai-S3000XL-ROM-FREE-Windows-VST3-build-check
+          path: build/windows/**/VST3/**
+          if-no-files-found: error
+          retention-days: 7

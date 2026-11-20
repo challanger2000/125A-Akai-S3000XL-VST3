@@ -42,6 +42,16 @@ The **user-facing workflow should match the Emulator II/III**: directly choose/l
 - The upstream save-state code visibly serializes SD-1 `osram`/`seqram` shares; that is **not a proof** S3000XL sample RAM and programs are restored correctly. True sample/project recall is a priority.
 - MAME global process state may prevent safe simultaneous VST instances, as upstream port notes warn. Verify, do not assume.
 
+## P005 full Windows build - source pipeline
+- The author-specific `F:\\MPC3000vsti` Projucer path and missing
+  Ensoniq decors/MAME ZIP prevented a portable build.
+- Replaced them with an independent CMake/JUCE 8.0.12 + MAME 0.288
+  Windows VS2022 pipeline and original MAME layout resources.
+- The public runner is **ROM-free by design**. The user's final build must
+  embed both verified ROMs locally and privately.
+- **NOT PASSED until full Windows job succeeds**: see
+  [P005 build contract](docs/P005-WINDOWS-BUILD.md).
+
 ## P004 firmware-guarded recording controller (source only)
 - Original-ROM strings and operator manual confirm SAMPLE/F2/ARM/GO workflow and a `- new -` unique-name gate. A read-only MAME LCD-text snapshot and fail-closed button state controller are now coded.
 - MEDIA-selected or dragged WAVs request firmware navigation; recording is allowed only after exact current LCD setup/new-name/WAITING screens and WADCS ARM state, with 120 ms key holds and explicit stop confirmation.
