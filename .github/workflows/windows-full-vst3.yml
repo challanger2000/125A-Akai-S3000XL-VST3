@@ -30,6 +30,7 @@ jobs:
             git make python
             mingw-w64-x86_64-gcc
             mingw-w64-x86_64-pkgconf
+            mingw-w64-x86_64-python
       - name: Checkout pinned MAME + JUCE, verify and apply patch
         shell: pwsh
         run: |
@@ -51,7 +52,12 @@ jobs:
         working-directory: external/mame
         run: |
           export OS=Windows_NT
-          make vs2022 SUBTARGET=s3000xl SOURCES=src/mame/akai/s3000.cpp NOWERROR=1 -j2
+          # GENie is a native Windows exe. Its absolute makedep.py path uses
+          # D:/... drive notation; MSYS2 /usr/bin/python3 treats it as a
+          # POSIX-relative path. Use the MinGW *native Windows* Python.
+          test -f /mingw64/bin/python.exe
+          /mingw64/bin/python.exe -c "import sys; assert sys.platform == 'win32'"
+          make vs2022 SUBTARGET=s3000xl SOURCES=src/mame/akai/s3000.cpp NOWERROR=1 PYTHON_EXECUTABLE=/mingw64/bin/python.exe -j2
       - name: Compile full MAME static libraries
         shell: pwsh
         run: |
