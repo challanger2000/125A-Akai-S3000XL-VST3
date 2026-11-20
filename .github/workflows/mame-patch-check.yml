@@ -28,6 +28,7 @@ jobs:
             src/mame/akai/s3000.cpp \
             src/devices/video/hd61830.cpp \
             src/devices/video/hd61830.h \
+            src/lib/formats/flopimg.h \
             src/zexall/main.cpp
           git -C mame-reference checkout
       - name: Check original patch applicability without applying changes

@@ -58,3 +58,10 @@ All proprietary ROMs remain **only in the user's private build**.
   implementation occurs on `develop/v1.0.0`.
 - Never use an intermediate CI success from isolated CTests as a VST3
   release acceptance.
+
+## Full build attempt and compiler correction — 2026-11-20
+- [Run 44820202400](https://github.com/challanger2000/125A-Akai-S3000XL-VST3/actions/runs/44820202400): checked out pinned MAME/JUCE, verified patch, generated open resources, and **generated VS2022 projects successfully**.
+- The real VS2022 MAME build **FAILED**, compiler `C2039/C2061` at upstream `src/lib/formats/flopimg.h:96`: `std::string_view` was used with no corresponding `#include <string_view>`. The follow-on errors `C2511/C2352` in `flopimg.cpp` were consequences of the missing type.
+- Explicitly included `<string_view>` in the original MAME 0.288 header using this repository's patch (no behavioral or recording changes). Also included `flopimg.h` in the MAME-patch integrity workflow's sparse-checkout list. **A new full build must pass before this fix can be accepted.**
+- The above failure is not a ROM problem; the public build intentionally contains no proprietary ROMs.
+

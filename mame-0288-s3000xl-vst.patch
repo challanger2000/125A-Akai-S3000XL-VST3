@@ -3326,3 +3326,16 @@ diff --git a/src/devices/video/hd61830.cpp b/src/devices/video/hd61830.cpp
  uint16_t hd61830_device::draw_scanline(bitmap_ind16 &bitmap, const rectangle &cliprect, int y, uint16_t ra)
  {
  	for (int sx = 0; sx < m_hn; sx+=2)
+diff --git a/src/lib/formats/flopimg.h b/src/lib/formats/flopimg.h
+--- a/src/lib/formats/flopimg.h
++++ b/src/lib/formats/flopimg.h
+@@ -16,8 +16,9 @@
+ #include "utilfwd.h"
+ 
+ #include <memory>
++#include <string_view>
+ #include <vector>
+ 
+ #include <cassert>
+ #include <cstddef>
+ #include <cstdint>
