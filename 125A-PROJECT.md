@@ -29,6 +29,13 @@ The user wants to import ordinary Windows .wav samples **directly into the runni
 - Prefer a fully integrated conversion module, not a separately installed program. Study `akaiutil` for format-validation reference only pending compatibility/licensing evaluation (its published license is GPLv2, while this project combines GPLv3 components).
 - This feature is **not implemented upstream**. The plugin currently accepts DAW input for original-firmware sampling and mounts Akai floppy/CD/SCSI images; those are distinct from direct WAV import.
 
+### UX and implementation precedent: the user's Emulator II and Emulator III projects
+This is **not a new UX concept**: follow the existing user-approved direct WAV-import workflow and standards of the user's repositories
+- https://github.com/challanger2000/125A-Emulator-II-Windows-VST3 — `docs/P001-WAV-BRIDGE.md`, `src/125a_wav_input.h`, firmware SAMPLE/SAR recording
+- https://github.com/challanger2000/125A-Emulator-III-Windows-VST3 — `source/upstream/runtime/wav_import.h`, `source/upstream/runtime/wav_firmware_import.h`, firmware-driven import
+
+The **user-facing workflow should match the Emulator II/III**: directly choose/load a WAV within the plugin and make it playable as a native sample through the original sampler firmware, with no additional externally installed utilities or manual disk image creation. Reuse the **approach and verified methods**, but adapt the implementation to **Akai S3000XL's** own ADC, disk, firmware and sample-memory architecture; do not transplant E-mu-specific device code or assume identical sampling behavior. Protect native sample formatting, stereo, memory, and project recall. Require positive S3000XL ROM-backed proof before declaring parity.
+
 ### Repository audit flags (initial source inspection; needs actual tests)
 - The upstream code still contains legacy Ensoniq SD-1 names, OS-RAM and sequencer-RAM save/restore code, and a UI message claiming "10 specific .bin files." These are suspect for the S3000XL, which requires the main V2.0 firmware and HD61830 character ROM. Audit/remove only after checking which paths are live.
 - MAME sample-memory region is mapped to 32 MiB, but effective S3000XL V2.0 detected size must be measured with firmware.
