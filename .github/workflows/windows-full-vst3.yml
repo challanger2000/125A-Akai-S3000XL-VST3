@@ -43,6 +43,13 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "MAME patch is not applicable" }
           git -C external/mame apply "$env:GITHUB_WORKSPACE/mame-0288-s3000xl-vst.patch"
           if ($LASTEXITCODE -ne 0) { throw "MAME patch application failed" }
+      - name: Patch JUCE VST3 callback lock to nonblocking try-lock
+        shell: pwsh
+        run: |
+          python scripts/build/test_patch_juce_vst3_realtime.py
+          if ($LASTEXITCODE -ne 0) { throw "JUCE realtime patch negative-control tests failed" }
+          python scripts/build/patch_juce_vst3_realtime.py --juce-root external/JUCE
+          if ($LASTEXITCODE -ne 0) { throw "Cannot prove realtime-safe JUCE VST3 callback lock" }
       - name: Create verified open-source layout resources
         shell: pwsh
         run: |
