@@ -76,7 +76,56 @@ jobs:
         continue-on-error: true
         shell: pwsh
         run: |
-          $exe=Get-ChildItem tester -Recurse -File -Filter '125A_Plugin_Tester.exe' | Select-Object -First 1
+          $exe=Get-ChildItem tester -Recurse -File | Where-Object { $_.Name -match '^125A_Plugin_Tester(_v0\.3\.2)?\.exe
+          if(-not $exe){throw '125A Plugin Tester executable missing'}
+          $bundle=Get-Content selected-vst3.txt -Raw
+          $bundle=$bundle.Trim()
+          New-Item -ItemType Directory -Force -Path reports | Out-Null
+          $env:125A_PLUGIN_TESTER_REPORT_DIR=(Resolve-Path reports).Path
+          Write-Output "Testing actual bundle: $bundle"
+          $p=Start-Process -FilePath $exe.FullName -ArgumentList @("""$bundle""") -PassThru
+          try {
+            Wait-Process -Id $p.Id -Timeout 420 -ErrorAction Stop
+          } catch {
+            Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+            'HOST_TEST_TIMEOUT=420s' | Set-Content reports/status.txt
+            throw '125A Plugin Tester timed out'
+          }
+          $p.Refresh()
+          "HOST_TEST_EXIT=$($p.ExitCode)" | Tee-Object -FilePath reports/status.txt
+          $out=Get-ChildItem reports -File -ErrorAction SilentlyContinue
+          $out | ForEach-Object { Write-Output "QA_ARTIFACT: $($_.Name) $($_.Length)" }
+          if($p.ExitCode -ne 0) {throw "125A Plugin Tester reports FAILED: exit $($p.ExitCode)"}
+      - name: Print actual QA evidence and classify result
+        if: always()
+        shell: pwsh
+        run: |
+          if(Test-Path factory-smoke.txt){Get-Content factory-smoke.txt}
+          if(Test-Path reports/status.txt){Get-Content reports/status.txt}
+          Get-ChildItem reports -File -ErrorAction SilentlyContinue |
+            Where-Object {$_.Name -match 'QA_Report.txt|Guard_Report.txt|Steinberg_Validator.txt|Editor_Lifecycle_Probe.txt'} |
+            ForEach-Object {
+              Write-Output "===== $($_.Name) ====="
+              Get-Content $_.FullName | Select-Object -Last 110
+            }
+      - name: Upload factory and actual host QA reports even on failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: 125A-Akai-S3000XL-ROM-FREE-REAL-WINDOWS-HOST-QA
+          path: |
+            factory-smoke.txt
+            reports/**
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Fail the QA gate if the production host test failed
+        if: always()
+        shell: pwsh
+        env:
+          HOST_OUTCOME: ${{ steps.tester.outcome }}
+        run: |
+          if($env:HOST_OUTCOME -ne 'success'){throw "Actual 125A host QA failed. See uploaded diagnostic reports. This is not a PASS."}
+ } | Select-Object -First 1
           if(-not $exe){throw '125A Plugin Tester executable missing'}
           $bundle=Get-Content selected-vst3.txt -Raw
           $bundle=$bundle.Trim()
