@@ -1,0 +1,127 @@
+name: 125A Akai - Windows VST3 actual host QA (ROM-free)
+on:
+  workflow_dispatch:
+  push:
+    branches: [ 'develop/**' ]
+    paths:
+      - '.github/workflows/windows-host-qa.yml'
+permissions:
+  contents: read
+  actions: read
+jobs:
+  real-vst3-host:
+    runs-on: windows-2022
+    timeout-minutes: 30
+    steps:
+      - name: Checkout QA workflow
+        uses: actions/checkout@v4
+      - name: Download successfully linked 125A VST3 binary from pinned build run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          gh run download 44823748936 --repo challanger2000/125A-Akai-S3000XL-VST3 --name 125A-Akai-S3000XL-ROM-FREE-Windows-VST3-build-check --dir incoming
+          if ($LASTEXITCODE -ne 0) { throw 'Full-build artifact was not downloaded' }
+          Get-ChildItem incoming -Recurse -File | ForEach-Object { Write-Output "$($_.Length) $($_.FullName)" }
+      - name: Verify Windows VST3 module is loadable and exports a working factory
+        shell: pwsh
+        run: |
+          $bundles = @(Get-ChildItem incoming -Recurse -Directory -Filter '*.vst3')
+          $modules = @(Get-ChildItem incoming -Recurse -File -Filter '*.vst3')
+          if ($bundles.Count -ne 1 -or $modules.Count -ne 1) {
+            throw "Expected one Windows VST3 bundle and binary, got $($bundles.Count)/$($modules.Count)"
+          }
+          $bundle=$bundles[0]; $module=$modules[0]
+          if (-not $module.FullName.StartsWith($bundle.FullName)) {throw 'Binary outside bundle'}
+          $type = @'
+          using System;
+          using System.Runtime.InteropServices;
+          public static class NativeVST3 {
+            [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true, EntryPoint="LoadLibraryW")]
+            public static extern IntPtr LoadLibrary(string name);
+            [DllImport("kernel32.dll", CharSet=CharSet.Ansi, SetLastError=true, EntryPoint="GetProcAddress")]
+            public static extern IntPtr GetProcAddress(IntPtr module, string name);
+            [DllImport("kernel32.dll", SetLastError=true, EntryPoint="FreeLibrary")]
+            public static extern bool FreeLibrary(IntPtr module);
+            [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+            public delegate IntPtr FactoryFunction();
+          }
+          '@
+          Add-Type -TypeDefinition $type
+          $dll=[NativeVST3]::LoadLibrary($module.FullName)
+          if($dll -eq [IntPtr]::Zero) {
+            throw "LoadLibrary failed (Win32: $([Runtime.InteropServices.Marshal]::GetLastWin32Error()))"
+          }
+          try {
+            $addr=[NativeVST3]::GetProcAddress($dll,'GetPluginFactory')
+            if($addr -eq [IntPtr]::Zero) {throw 'VST3 GetPluginFactory export is absent'}
+            $factory=[Runtime.InteropServices.Marshal]::GetDelegateForFunctionPointer($addr,[type][NativeVST3+FactoryFunction])
+            $ptr=$factory.Invoke()
+            if($ptr -eq [IntPtr]::Zero) {throw 'GetPluginFactory returned nullptr'}
+            "REAL_WINDOWS_VST3_LOAD=PASS FACTORY=NONNULL MODULE=$($module.FullName)" | Tee-Object -FilePath factory-smoke.txt
+          } finally {
+            [void][NativeVST3]::FreeLibrary($dll)
+          }
+          $bundle.FullName | Set-Content -Path selected-vst3.txt
+      - name: Fetch existing verified 125A Plugin Tester v0.3.2 Windows binary
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          gh run download 39823684764 --repo challanger2000/125A-Plugin-Tester-Final --name 125A-Plugin-Tester-v0.3.2-Windows-x64 --dir tester
+          if($LASTEXITCODE -ne 0){throw 'Cannot download pinned 125A Plugin Tester v0.3.2 artifact'}
+          Get-ChildItem tester -Recurse -File | ForEach-Object { Write-Output "$($_.Length) $($_.Name)" }
+      - name: Run production 125A VST3 tester against real plugin module
+        id: tester
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $exe=Get-ChildItem tester -Recurse -File -Filter '125A_Plugin_Tester.exe' | Select-Object -First 1
+          if(-not $exe){throw '125A Plugin Tester executable missing'}
+          $bundle=Get-Content selected-vst3.txt -Raw
+          $bundle=$bundle.Trim()
+          New-Item -ItemType Directory -Force -Path reports | Out-Null
+          $env:125A_PLUGIN_TESTER_REPORT_DIR=(Resolve-Path reports).Path
+          Write-Output "Testing actual bundle: $bundle"
+          $p=Start-Process -FilePath $exe.FullName -ArgumentList @("""$bundle""") -PassThru
+          try {
+            Wait-Process -Id $p.Id -Timeout 420 -ErrorAction Stop
+          } catch {
+            Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+            'HOST_TEST_TIMEOUT=420s' | Set-Content reports/status.txt
+            throw '125A Plugin Tester timed out'
+          }
+          $p.Refresh()
+          "HOST_TEST_EXIT=$($p.ExitCode)" | Tee-Object -FilePath reports/status.txt
+          $out=Get-ChildItem reports -File -ErrorAction SilentlyContinue
+          $out | ForEach-Object { Write-Output "QA_ARTIFACT: $($_.Name) $($_.Length)" }
+          if($p.ExitCode -ne 0) {throw "125A Plugin Tester reports FAILED: exit $($p.ExitCode)"}
+      - name: Print actual QA evidence and classify result
+        if: always()
+        shell: pwsh
+        run: |
+          if(Test-Path factory-smoke.txt){Get-Content factory-smoke.txt}
+          if(Test-Path reports/status.txt){Get-Content reports/status.txt}
+          Get-ChildItem reports -File -ErrorAction SilentlyContinue |
+            Where-Object {$_.Name -match 'QA_Report.txt|Guard_Report.txt|Steinberg_Validator.txt|Editor_Lifecycle_Probe.txt'} |
+            ForEach-Object {
+              Write-Output "===== $($_.Name) ====="
+              Get-Content $_.FullName | Select-Object -Last 110
+            }
+      - name: Upload factory and actual host QA reports even on failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: 125A-Akai-S3000XL-ROM-FREE-REAL-WINDOWS-HOST-QA
+          path: |
+            factory-smoke.txt
+            reports/**
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Fail the QA gate if the production host test failed
+        if: always()
+        shell: pwsh
+        env:
+          HOST_OUTCOME: ${{ steps.tester.outcome }}
+        run: |
+          if($env:HOST_OUTCOME -ne 'success'){throw "Actual 125A host QA failed. See uploaded diagnostic reports. This is not a PASS."}
