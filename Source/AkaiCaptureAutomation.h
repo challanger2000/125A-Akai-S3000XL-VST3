@@ -21,6 +21,7 @@ enum class Stage: int {
     WaitStop=11, RecordedSample=12,
     PressName=13, PressNumericMode=14, TypeName=15,
     ConfirmName=16, WaitNamed=17,
+    PressBootSkip=18, WaitBootReady=19,
     NeedNewSample=20, NoReadableLcd=21, OverwriteRisk=22,
     TimedOut=23, Busy=24, Cancelled=25,
     SourceUnavailable=26, SampleTruncated=27
@@ -72,13 +73,25 @@ inline bool lettersEditorVisible(std::string_view lcd) noexcept {
 inline bool numbersEditorVisible(std::string_view lcd) noexcept {
     return contains(lcd,"NUMBERS") && contains(lcd,"NAME FOR LETTERS");
 }
+inline bool isOriginalBootWait(std::string_view lcd) noexcept {
+    return contains(lcd,"WAITING FOR HARD DISK");
+}
+inline bool hasOriginalBootSkip(std::string_view lcd) noexcept {
+    return isOriginalBootWait(lcd) && contains(lcd,"SKIP");
+}
+inline bool isOriginalStartupScreen(std::string_view lcd) noexcept {
+    return isOriginalBootWait(lcd)
+        || contains(lcd,"OPERATING SYSTEM")
+        || (contains(lcd,"PROGRAMS IN MEMORY") && !contains(lcd,"SLCT"));
+}
 inline bool overwriteWarning(std::string_view text) noexcept {
     return contains(text,"OVERWRITE") || contains(text,"EXISTS!")
         || contains(text,"REPLACE EXISTING") || contains(text,"DELETE");
 }
 constexpr bool isRunningStage(Stage s) noexcept {
     return (s>=Stage::WaitWav && s<=Stage::WaitStop)
-        || (s>=Stage::PressName && s<=Stage::WaitNamed);
+        || (s>=Stage::PressName && s<=Stage::WaitNamed)
+        || s==Stage::PressBootSkip || s==Stage::WaitBootReady;
 }
 constexpr Button numericButton(char digit) noexcept {
     switch(digit){
@@ -98,6 +111,7 @@ public:
         nameSequence_=++nextName_;
         nameIndex_=0;
         nameRetries_=0;
+        bootSkipAttempts_=0;
         stage_=Stage::WaitWav; enteredMs_=ms; held_=Button::None;
         return true;
     }
@@ -131,7 +145,8 @@ public:
         if ((stage_==Stage::PressSample || stage_==Stage::WaitSetup ||
              stage_==Stage::PressRec || stage_==Stage::WaitNewSample ||
              stage_==Stage::PressArm || stage_==Stage::WaitArmed ||
-             (stage_>=Stage::PressName && stage_<=Stage::WaitNamed)) &&
+             (stage_>=Stage::PressName && stage_<=Stage::WaitNamed) ||
+             stage_==Stage::PressBootSkip || stage_==Stage::WaitBootReady) &&
              !o.wavReady)
             return finish(Stage::SourceUnavailable);
         if(ms>=enteredMs_ && ms-enteredMs_>timeoutForStage())
@@ -139,15 +154,19 @@ public:
                         :(!o.readable && (stage_==Stage::WaitSetup ||
                            stage_==Stage::WaitNewSample))?Stage::NoReadableLcd
                         :Stage::TimedOut);
-        // Release a held button only after a stable >=120 ms key scan interval.
+        // The real Akai's HDD-not-ready SKIP key is accepted only after
+        // its original boot-time SCSI scan has begun. Hold F8 longer than
+        // a normal navigation key so the original firmware can scan it.
         if(held_!=Button::None) {
-            if(ms>=pulseStartMs_ && ms-pulseStartMs_>=120) {
+            const auto holdMs=(stage_==Stage::PressBootSkip)?500u:120u;
+            if(ms>=pulseStartMs_ && ms-pulseStartMs_>=holdMs) {
                 auto b=held_;held_=Button::None;
                 switch(stage_) {
                 case Stage::PressSample: transition(Stage::WaitSetup,ms);break;
                 case Stage::PressRec: transition(Stage::WaitNewSample,ms);break;
                 case Stage::PressArm: transition(Stage::WaitArmed,ms);break;
                 case Stage::PressGo: transition(Stage::WaitRecording,ms);break;
+                case Stage::PressBootSkip: transition(Stage::WaitBootReady,ms);break;
                 case Stage::PressName: transition(Stage::PressNumericMode,ms);break;
                 case Stage::PressNumericMode: transition(Stage::TypeName,ms);break;
                 case Stage::TypeName:
@@ -163,6 +182,17 @@ public:
         switch(stage_) {
             case Stage::WaitWav:
                 if(o.firmwareReady && o.wavReady && o.readable){
+                    // Original V2.0 first displays PROGRAMS IN MEMORY and then
+                    // can remain on "waiting for hard disk ready.. SKIP".
+                    // Initial MAME CPU/LCD activity is NOT firmware-ready
+                    // for panel commands. Use only its original F8 SKIP key.
+                    if(hasOriginalBootSkip(o.lcd)) {
+                        if(++bootSkipAttempts_>8)
+                            return finish(Stage::TimedOut);
+                        transition(Stage::PressBootSkip,ms);
+                        return press(Button::ArmF8,ms);
+                    }
+                    if(isOriginalStartupScreen(o.lcd)) break;
                     // If already on record setup, don't press SAMPLE again.
                     if(contains(o.lcd,"RECORD SET-UP")) {
                         transition(Stage::PressRec,ms);
@@ -170,6 +200,19 @@ public:
                     }
                     transition(Stage::PressSample,ms);
                     return press(Button::Sample,ms);
+                }
+                break;
+            case Stage::WaitBootReady:
+                if(o.readable && !isOriginalStartupScreen(o.lcd)) {
+                    transition(Stage::WaitWav,ms);
+                    break;
+                }
+                if(o.readable && hasOriginalBootSkip(o.lcd)
+                   && ms>=enteredMs_ && ms-enteredMs_>=2500) {
+                    if(++bootSkipAttempts_>8)
+                        return finish(Stage::TimedOut);
+                    transition(Stage::PressBootSkip,ms);
+                    return press(Button::ArmF8,ms);
                 }
                 break;
             case Stage::WaitSetup:
@@ -258,7 +301,7 @@ private:
     std::uint64_t pulseStartMs_=0;
     std::uint32_t nextName_=0;
     std::uint32_t nameSequence_=0;
-    unsigned nameIndex_=0, nameRetries_=0;
+    unsigned nameIndex_=0, nameRetries_=0, bootSkipAttempts_=0;
     // Exactly 12 digits: prefix "125" + nine-digit serial (1..999999999).
     // The Akai naming dialog is limited to 12 characters. Fully overwrite
     // all positions, including any existing waveform name suffix.
@@ -278,6 +321,7 @@ private:
         if(stage_==Stage::WaitStop)return 120000; // firmware's duration controls stop
         if(stage_==Stage::Capturing)return 120000;
         if(stage_==Stage::WaitWav)return 30000;
+        if(stage_==Stage::WaitBootReady)return 12000;
         return 8000;
     }
     Decision press(Button button,std::uint64_t ms)noexcept{

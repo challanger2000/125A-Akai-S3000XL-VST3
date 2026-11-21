@@ -48,6 +48,54 @@ int main(){
        bootDecision.command==Command::Release &&
        bootDecision.button==Button::RecF2,
        "firmware_loss_releases_owned_key");
+
+    // P023 actual ORIGINAL ROM V2.0 headless LCD regression.
+    // Owner's ROM boot was measured: at 4s "OPERATING SYSTEM 2.00",
+    // at 9-23s "waiting for hard disk ready.. SKIP". A real F8 at
+    // emulated 23.5s brought up SLCT/MIX and then SAMPLE→RECORD SET-UP.
+    ck(isOriginalStartupScreen("PROGRAMS IN MEMORY OPERATING SYSTEM 2.00"),
+       "original_startup_not_record_ready");
+    ck(hasOriginalBootSkip("waiting for hard disk ready.. SKIP"),
+       "real_rom_hdd_wait_skip_prompt");
+    ck(!hasOriginalBootSkip("WAITING FOR HARD DISK READY"),
+       "no_skip_label_no_blind_f8");
+    Controller bootCapture;
+    ck(bootCapture.start(0),"boot_hdd_capture_start");
+    auto boot=at("PROGRAMS IN MEMORY OPERATING SYSTEM 2.00");
+    r=bootCapture.step(boot,100);
+    ck(r.stage==Stage::WaitWav && r.command==Command::None,
+       "no_sample_during_original_rom_startup");
+    r=bootCapture.step(at("PROGRAMS IN MEMORY waiting for hard disk ready.. SKIP"),300);
+    ck(r.stage==Stage::PressBootSkip && r.command==Command::Press &&
+       r.button==Button::ArmF8,"native_f8_skip_pending_hdd");
+    r=bootCapture.step(at("waiting for hard disk ready.. SKIP"),600);
+    ck(r.command==Command::None,"boot_hardware_key_500ms");
+    r=bootCapture.step(at("waiting for hard disk ready.. SKIP"),801);
+    ck(r.command==Command::Release && r.button==Button::ArmF8 &&
+       r.stage==Stage::WaitBootReady,"release_boot_skip_on_mame_owner_thread");
+    r=bootCapture.step(at("waiting for hard disk ready.. SKIP"),1200);
+    ck(r.command==Command::None && r.stage==Stage::WaitBootReady,
+       "await_actual_native_firmware_ready");
+    r=bootCapture.step(at("waiting for hard disk ready.. SKIP"),3400);
+    ck(r.command==Command::Press && r.button==Button::ArmF8,
+       "retry_skip_only_after_firmware_timeout");
+    r=bootCapture.step(at("waiting for hard disk ready.. SKIP"),3910);
+    ck(r.command==Command::Release &&
+       r.stage==Stage::WaitBootReady,"release_boot_skip_retry");
+    r=bootCapture.step(at("PROGRAMS IN MEMORY SLCT MIX MIDI LOUD DISK DEL RNUM"),4000);
+    ck(r.command==Command::None && r.stage==Stage::WaitWav,
+       "exact_native_ready_page_after_f8");
+    r=bootCapture.step(at("PROGRAMS IN MEMORY SLCT MIX MIDI LOUD DISK DEL RNUM"),4010);
+    ck(r.command==Command::Press && r.button==Button::Sample,
+       "sample_only_after_original_hdd_boot_skip");
+    Controller noSkip;
+    ck(noSkip.start(0),"no_skip_label_start");
+    r=noSkip.step(at("WAITING FOR HARD DISK READY"),2000);
+    ck(r.command==Command::None && r.stage==Stage::WaitWav,
+       "never_guess_f8_if_original_lcd_has_no_skip");
+    ck(isRunningStage(Stage::PressBootSkip) &&
+       isRunningStage(Stage::WaitBootReady),
+       "wav_replacement_locked_during_boot_skip");
     Controller c;
     ck(c.start(0),"begin");
     auto r=c.step(at("RECORD SET-UP"),0);
