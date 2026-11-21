@@ -138,9 +138,7 @@ public:
     std::atomic<std::uint32_t> nativeSnapshotFinished{0};
     std::atomic<bool> nativeSnapshotSucceeded{false};
     juce::WaitableEvent nativeSnapshotEvent{false};
-    std::atomic<bool> nativeRestoreRequested{false};
-    std::mutex nativeRestoreMutex;
-    std::shared_ptr<const std::vector<std::uint8_t>> nativePendingRestore;
+    akai::machine_state::RestoreMailbox nativeRestore;
     std::mutex nativeStateHostMutex;
     juce::File nativeSnapshotFile() const {
         return juce::File(instanceTempDir).getChildFile("state")

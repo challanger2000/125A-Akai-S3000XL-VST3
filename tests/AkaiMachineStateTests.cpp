@@ -42,5 +42,35 @@ int main(){
     payload.resize(32);
     ck(encode(payload,envelope),"minimal_32byte_mame_save");
     ck(decode(envelope,decoded)&&decoded==payload,"minimal_save_replaces_previous");
+    // P020: project A restore may finish after project B has superseded it.
+    RestoreMailbox mb;
+    auto first=std::make_shared<const std::vector<std::uint8_t>>(32,11);
+    auto second=std::make_shared<const std::vector<std::uint8_t>>(32,22);
+    mb.publish(first);
+    auto workA=mb.take();
+    ck(bool(workA)&&workA.bytes==first&&mb.needsService(),
+       "restore_mailbox_first_request");
+    ck(mb.unresolved()==first,"resave_pending_original_image");
+    mb.publish(second);
+    mb.finish(workA,true);
+    auto workB=mb.take();
+    ck(bool(workB)&&workB.bytes==second && mb.needsService() &&
+       mb.unresolved()==second,"stale_restore_completion_cannot_cancel_newer");
+    mb.finish(workB,true);
+    ck(!mb.take()&&!mb.needsService()&&!mb.unresolved(),
+       "successful_restore_no_longer_pending");
+    ck(mb.current()==second,"loaded_state_retained_for_stopped_host");
+    mb.publish(first);
+    auto failWork=mb.take();
+    mb.finish(failWork,false);
+    ck(mb.lastAttemptFailed() && !mb.needsService() &&
+       !mb.take() && mb.unresolved()==first,
+       "failed_io_preserves_image_without_unbounded_retry");
+    mb.publish(second);
+    ck(!mb.lastAttemptFailed()&&bool(mb.take())&&mb.needsService(),
+       "new_project_after_failed_restore_rearms");
+    mb.publish({});
+    ck(!mb.take()&&!mb.unresolved()&&!mb.current()&&!mb.needsService(),
+       "legacy_project_cancels_previous_native_restore");
     std::printf("AKAI_MACHINE_STATE_ENVELOPE_PASS %d\n",tests);
 }

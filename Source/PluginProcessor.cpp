@@ -484,7 +484,7 @@ void EnsoniqSD1AudioProcessor::pushAudioFromMame(const int16_t* pcmBuffer, int n
 
                         if (requestMameSave.load(std::memory_order_acquire)
                             || requestMameLoad.load(std::memory_order_acquire)
-                            || nativeRestoreRequested.load(std::memory_order_acquire)
+                            || nativeRestore.needsService()
                             || nativeSnapshotRequested.load(std::memory_order_acquire)
                                != nativeSnapshotFinished.load(std::memory_order_acquire)) {
                             // P017: a throttled native MAME sink must not block
@@ -947,26 +947,27 @@ public:
         // P017 native full MAME snapshot. Never use unsafe guest-RAM reads
         // to simulate a complete project state. All MAME save/restore operations
         // run ONLY on this MAME owner thread, outside the host audio callback.
-        if (processor->nativeRestoreRequested.exchange(false,std::memory_order_acq_rel)) {
-            std::shared_ptr<const std::vector<std::uint8_t>> raw;
-            {
-                std::lock_guard<std::mutex> guard(processor->nativeRestoreMutex);
-                raw=processor->nativePendingRestore;
-            }
-            if(raw && raw->size()>=32
-               && raw->size()<=akai::machine_state::maxSnapshot) {
+        if (const auto work=processor->nativeRestore.take()) {
+            bool issued=false;
+            if(work.bytes->size()>=32
+               && work.bytes->size()<=akai::machine_state::maxSnapshot) {
                 auto dest=processor->nativeSnapshotFile();
                 if(dest.getParentDirectory().createDirectory().wasOk()) {
                     dest.deleteFile(); // no stale snapshot on failed write
                     auto stream=dest.createOutputStream();
                     if(stream && stream->openedOk()
-                        && stream->write(raw->data(),raw->size())) {
+                        && stream->write(work.bytes->data(),work.bytes->size())) {
                         stream->flush();
                         stream.reset();
                         mame_machine->immediate_load(dest.getFullPathName().toStdString());
+                        // MAME 0.288 immediate_load returns void. This only
+                        // proves the call was issued, NOT that the guest
+                        // firmware or sample RAM was restored correctly.
+                        issued=true;
                     }
                 }
             }
+            processor->nativeRestore.finish(work,issued);
         }
         const auto seq=processor->nativeSnapshotRequested.load(std::memory_order_acquire);
         if(seq!=processor->nativeSnapshotFinished.load(std::memory_order_acquire)) {
@@ -2928,7 +2929,14 @@ void EnsoniqSD1AudioProcessor::getStateInformation (juce::MemoryBlock& destData)
         std::lock_guard<std::mutex> hostLock(nativeStateHostMutex);
         juce::MemoryBlock machineBytes;
         bool haveMachine=false;
-        if(isMameRunningFlag() && mameIsFullyBooted.load(std::memory_order_acquire)) {
+        // An in-flight project restore is more authoritative than whatever
+        // old/empty machine state is currently running. A save while the MAME
+        // worker is restoring must preserve the incoming exact original .sta.
+        const auto unresolved= nativeRestore.unresolved();
+        if(unresolved) {
+            machineBytes.append(unresolved->data(),unresolved->size());
+            haveMachine=true;
+        } else if(isMameRunningFlag() && mameIsFullyBooted.load(std::memory_order_acquire)) {
             const auto seq=nativeSnapshotRequested.fetch_add(
                 1,std::memory_order_acq_rel)+1;
             nativeSnapshotEvent.reset();
@@ -2950,10 +2958,9 @@ void EnsoniqSD1AudioProcessor::getStateInformation (juce::MemoryBlock& destData)
             }
         } else {
             // Preserve an incoming snapshot when DAW saves before firmware boot.
-            std::lock_guard<std::mutex> pendingLock(nativeRestoreMutex);
-            if(nativePendingRestore && !nativePendingRestore->empty()) {
-                machineBytes.append(nativePendingRestore->data(),
-                                    nativePendingRestore->size());
+            const auto retained=nativeRestore.current();
+            if(retained && !retained->empty()) {
+                machineBytes.append(retained->data(),retained->size());
                 haveMachine=true;
             }
         }
@@ -2965,6 +2972,8 @@ void EnsoniqSD1AudioProcessor::getStateInformation (juce::MemoryBlock& destData)
             const juce::MemoryBlock encoded(envelope.data(),envelope.size());
             xml->setAttribute("akai_native_machine_v1",encoded.toBase64Encoding());
             xml->setAttribute("akai_native_complete",true);
+            xml->setAttribute("akai_native_restore_failed",
+                              nativeRestore.lastAttemptFailed());
         } else {
             // A missing snapshot must be VISIBLE to later QA. Old RAM
             // fragments are NOT a playable Akai project snapshot.
@@ -3034,9 +3043,7 @@ void EnsoniqSD1AudioProcessor::setStateInformation (const void* data, int sizeIn
         }
         {
             std::lock_guard<std::mutex> hostGuard(nativeStateHostMutex);
-            std::lock_guard<std::mutex> pendingGuard(nativeRestoreMutex);
-            nativePendingRestore=std::move(validatedNative);
-            nativeRestoreRequested.store(hasNative,std::memory_order_release);
+            nativeRestore.publish(std::move(validatedNative));
         }
 
         // 1. Restore VST Automation Parameters

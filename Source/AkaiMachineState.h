@@ -7,6 +7,9 @@
 #include <cstring>
 #include <span>
 #include <vector>
+#include <memory>
+#include <mutex>
+#include <atomic>
 namespace akai::machine_state {
 inline constexpr std::size_t maxSnapshot = 96u*1024u*1024u;
 inline constexpr std::size_t headerBytes = 28;
@@ -54,4 +57,62 @@ inline bool decode(std::span<const std::uint8_t> bytes,std::vector<std::uint8_t>
     std::vector<std::uint8_t> temp(image.begin(),image.end());
     out.swap(temp);return true;
 }
+
+// P020: one authoritative, generation-tagged owner-thread restore mailbox.
+// A previous restore may finish while a newer DAW project has arrived;
+// acknowledging the older work must never cancel the newer restore.
+// Source memory remains alive until completion or replacement. All mutex
+// operations happen only on MAME/control threads, never the VST audio thread.
+class RestoreMailbox {
+public:
+    using Image = std::shared_ptr<const std::vector<std::uint8_t>>;
+    struct Work {
+        Image bytes{};
+        std::uint64_t generation=0;
+        explicit operator bool() const noexcept { return bool(bytes); }
+    };
+    void publish(Image bytes) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        ++generation_;
+        image_=std::move(bytes);
+        failedGeneration_=0;
+        needsService_.store(bool(image_), std::memory_order_release);
+    }
+    Work take() const {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (!image_ || generation_==appliedGeneration_ ||
+            generation_==failedGeneration_) return {};
+        return {image_,generation_};
+    }
+    void finish(const Work& work, bool issued) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (!work || work.generation!=generation_ || image_!=work.bytes)
+            return; // A newer restore is pending; never discard it.
+        if (issued) appliedGeneration_=generation_;
+        else failedGeneration_=generation_; // avoid unbounded disk retries
+        needsService_.store(false,std::memory_order_release);
+    }
+    Image unresolved() const {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return (image_ && generation_!=appliedGeneration_)?image_:Image{};
+    }
+    Image current() const {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return image_;
+    }
+    bool lastAttemptFailed() const {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return image_ && failedGeneration_==generation_;
+    }
+    bool needsService() const noexcept {
+        return needsService_.load(std::memory_order_acquire);
+    }
+private:
+    mutable std::mutex mutex_;
+    Image image_{};
+    std::uint64_t generation_=0;
+    std::uint64_t appliedGeneration_=0;
+    std::uint64_t failedGeneration_=0;
+    std::atomic<bool> needsService_{false};
+};
 } // namespace akai::machine_state

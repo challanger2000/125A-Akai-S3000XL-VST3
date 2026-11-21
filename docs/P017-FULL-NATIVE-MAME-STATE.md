@@ -37,3 +37,18 @@ reopen a fresh instance, and compare note PCM and original sampler state.
 
 This P017 implementation is NOT a release certificate. Stop on failure and
 do not merge without new native Windows and private V2.0 acceptance.
+
+## P020: restore/save race corrected at the IPC boundary (not ROM certified)
+The P017 worker previously consumed a single boolean restore request before
+issuing original MAME immediate_load. A concurrent second project restore
+could be cleared by the first, and an immediate DAW save could capture the
+older running machine instead of the newly loaded project's pending image.
+A generation-tagged per-instance mailbox now preserves the latest validated
+image until the MAME owner has issued its load; an obsolete completion cannot
+acknowledge a newer image. A save while restore is unresolved serializes
+the pending exact .sta bytes. Failed sandbox writes retain the source image
+and explicitly flag failure instead of retrying disk operations every frame.
+A new native regression covers both orderings, failed I/O and cancellation.
+This is an IPC/source-level correctness improvement only: MAME 0.288
+immediate_load has no success return value and successful original-ROM V2.0
+load, playable PCM, keygroup mapping and portable project recall remain OPEN.
