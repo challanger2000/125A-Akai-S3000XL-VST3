@@ -1,0 +1,174 @@
+name: 125A Akai P015 - independent Windows Test Lab on P015 binary
+on:
+  workflow_dispatch:
+  push:
+    branches: ['develop/**']
+    paths:
+      - '.github/workflows/windows-testlab-p015.yml'
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  independent-test-lab:
+    runs-on: windows-2022
+    timeout-minutes: 75
+    steps:
+      - name: Checkout pinned independent Test Lab; NEVER check out private ROMs
+        uses: actions/checkout@v4
+        with:
+          repository: challanger2000/125A-Plugin-Test-Lab
+          ref: 9f84737b67588c5a3ab5649664bfe3032e529790
+          path: test-lab
+          persist-credentials: false
+      - name: Build genuine native Steinberg VST3 GUI, audio, state-stress hosts and good/bad controls
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          cmake -S test-lab -B test-lab/build -G 'Visual Studio 17 2022' -A x64
+          if ($LASTEXITCODE -ne 0) { throw 'Independent Test Lab CMake configure failed' }
+          cmake --build test-lab/build --config Release --parallel 4 --target TestLabGUI TestLabHost TestLabStateStress QAGuiNested QAStateMode0 QAStateMode2
+          if ($LASTEXITCODE -ne 0) { throw 'Independent Test Lab native host compilation failed' }
+      - name: Wait for exact successful P015 ROM-free Windows build and fetch that artifact
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $repo='challanger2000/125A-Akai-S3000XL-VST3'
+          $run=44906089036
+          $pinned='3c7ce9dae4086a918723d78d1ed53eb8196bab0a'
+          $done=$false
+          for($i=0;$i -lt 90;$i++) {
+            $state=gh api "repos/$repo/actions/runs/$run" --jq '{status: .status, conclusion: .conclusion, head_sha: .head_sha}'
+            if($LASTEXITCODE -ne 0) { throw 'Cannot verify P015 source workflow' }
+            $info=$state | ConvertFrom-Json
+            if($info.head_sha -ne $pinned) { throw 'P015 source provenance mismatch' }
+            if($info.status -eq 'completed') {
+              if($info.conclusion -ne 'success') { throw "P015 Windows build is not PASS: $($info.conclusion)" }
+              $done=$true
+              break
+            }
+            if(($i % 10) -eq 0) { Write-Host "P015 Windows build still running; checkpoint=$i/90" }
+            Start-Sleep -Seconds 20
+          }
+          if(-not $done) { throw 'P015 Windows build was not completed inside bounded wait' }
+          New-Item -ItemType Directory -Force -Path product | Out-Null
+          gh run download $run --repo $repo --name '125A-Akai-S3000XL-ROM-FREE-Windows-VST3-build-check' --dir product
+          if($LASTEXITCODE -ne 0) { throw 'Cannot download exact P015 ROM-free public VST3 artifact' }
+          $bundle=@(Get-ChildItem product -Directory -Recurse -Filter '125A Akai S3000XL.vst3')
+          if($bundle.Count -ne 1) { throw 'P015 artifact does not contain exactly one complete VST3 bundle' }
+          $module=@(Get-ChildItem $bundle[0].FullName -File -Recurse -Filter '125A Akai S3000XL.vst3')
+          if($module.Count -ne 1) { throw 'P015 artifact lacks its unique x86-64 VST3 module' }
+          $bytes=[System.IO.File]::ReadAllBytes($module[0].FullName)
+          if($bytes.Length -lt 1048576 -or $bytes[0] -ne 77 -or $bytes[1] -ne 90) {
+             throw 'P015 artifact is not a genuine Windows PE module'
+          }
+          $magic=[System.Text.Encoding]::ASCII.GetBytes('125AAKAIS3KV2ROM')
+          if($bytes.Length -ge 24) {
+            $tail=$bytes[($bytes.Length-24)..($bytes.Length-9)]
+            if([System.Linq.Enumerable]::SequenceEqual([byte[]]$tail,[byte[]]$magic)) {
+              throw 'Proprietary ROM overlay found in public Test Lab artifact'
+            }
+          }
+          $hash=(Get-FileHash -LiteralPath $module[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          New-Item -ItemType Directory -Force -Path results | Out-Null
+          [pscustomobject]@{source_run=$run;source_sha=$pinned;test_lab_sha='9f84737b67588c5a3ab5649664bfe3032e529790';module_sha256=$hash;private_roms_in_ci=$false;real_original_firmware_test='NOT RUN'} |
+            ConvertTo-Json | Set-Content results/PROVENANCE.json
+          Write-Host "P015_PINNED_PUBLIC_MODULE_SHA256=$hash"
+      - name: Verify independent laboratory catches deliberately defective VST3 state machine
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $gui=@(Get-ChildItem test-lab/build -File -Recurse -Filter '125A_Test_Lab_GUI.exe')
+          $audio=@(Get-ChildItem test-lab/build -File -Recurse -Filter '125A_Test_Lab_Host.exe')
+          $stress=@(Get-ChildItem test-lab/build -File -Recurse -Filter '125A_Test_Lab_State_Stress.exe')
+          $good=@(Get-ChildItem test-lab/build -Directory -Recurse -Filter '125A_QA_State_0.vst3')
+          $bad=@(Get-ChildItem test-lab/build -Directory -Recurse -Filter '125A_QA_State_2.vst3')
+          if($gui.Count -ne 1 -or $audio.Count -ne 1 -or $stress.Count -ne 1 -or
+             $good.Count -ne 1 -or $bad.Count -ne 1) { throw 'Test Lab host/fixtures missing or ambiguous' }
+          python test-lab/tests/run_universal_qa.py --plugin $good[0].FullName --gui-host $gui[0].FullName --audio-host $audio[0].FullName --stress-host $stress[0].FullName --run-technical-baseline --timeout 110 --out results/fixture-good
+          if($LASTEXITCODE -ne 0) { throw 'Independent good-state VST3 false negative' }
+          $positive=Get-Content results/fixture-good/UNIVERSAL-QA-RESULT.json -Raw | ConvertFrom-Json
+          if($positive.status -ne 'TECHNICAL_BASELINE_PASS' -or $positive.release_approved -ne $false) { throw 'Test Lab positive evidence or release policy incorrect' }
+          python test-lab/tests/run_universal_qa.py --plugin $bad[0].FullName --gui-host $gui[0].FullName --audio-host $audio[0].FullName --stress-host $stress[0].FullName --run-technical-baseline --timeout 110 --out results/fixture-bad
+          $negativeCode=$LASTEXITCODE
+          $negative=Get-Content results/fixture-bad/UNIVERSAL-QA-RESULT.json -Raw | ConvertFrom-Json
+          # P74 propagates native playback/save failure through onboarding.
+          # The top-level "discovery NOT RUN" is a CONSEQUENCE; it is not
+          # itself evidence that a state regression was detected. Demand
+          # the actual independent P32 failure details from the real host.
+          $p32=Get-Content results/fixture-bad/discovery/technical-baseline/native/P32/ADAPTER-RESULT.json -Raw | ConvertFrom-Json
+          $stateFaults=@($p32.cases | ForEach-Object { @($_.faults) } | Where-Object { $_ -match 'save_failures: expected eq 0, observed 100' })
+          if($negativeCode -ne 1 -or $negative.status -ne 'FAIL' -or
+             $negative.release_approved -ne $false -or $p32.status -ne 'FAIL' -or
+             $stateFaults.Count -lt 6) {
+            throw 'Test Lab did not prove native save-state mutant rejection in all six playback profiles'
+          }
+          Write-Host 'P015_INDEPENDENT_TEST_LAB_NATIVE_STATE_MUTANT=REJECTED_PROVEN'
+          # The negative native child intentionally returned 1. PowerShell
+          # otherwise inherits that as the GitHub step exit code despite
+          # successfully checking the expected negative result.
+          exit 0
+      - name: Real Akai ROM-free native Test Lab P74 inventory and technical baseline
+        id: real_product
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $bundle=@(Get-ChildItem product -Directory -Recurse -Filter '125A Akai S3000XL.vst3')
+          $gui=@(Get-ChildItem test-lab/build -File -Recurse -Filter '125A_Test_Lab_GUI.exe')
+          $audio=@(Get-ChildItem test-lab/build -File -Recurse -Filter '125A_Test_Lab_Host.exe')
+          $stress=@(Get-ChildItem test-lab/build -File -Recurse -Filter '125A_Test_Lab_State_Stress.exe')
+          if($bundle.Count -ne 1 -or $gui.Count -ne 1 -or $audio.Count -ne 1 -or $stress.Count -ne 1) {
+            throw 'Product or independent host missing'
+          }
+          $PSNativeCommandUseErrorActionPreference=$false
+          python test-lab/tests/run_universal_qa.py --plugin $bundle[0].FullName --gui-host $gui[0].FullName --timeout 110 --out results/akai-inventory
+          $discoveryCode=$LASTEXITCODE
+          python test-lab/tests/run_universal_qa.py --plugin $bundle[0].FullName --gui-host $gui[0].FullName --audio-host $audio[0].FullName --stress-host $stress[0].FullName --run-technical-baseline --timeout 110 --out results/akai-technical
+          $technicalCode=$LASTEXITCODE
+          $inventoryStatus='NO_REPORT'
+          $technicalStatus='NO_REPORT'
+          if(Test-Path results/akai-inventory/UNIVERSAL-QA-RESULT.json) {
+             $inventoryStatus=(Get-Content results/akai-inventory/UNIVERSAL-QA-RESULT.json -Raw | ConvertFrom-Json).status
+          }
+          if(Test-Path results/akai-technical/UNIVERSAL-QA-RESULT.json) {
+             $technicalStatus=(Get-Content results/akai-technical/UNIVERSAL-QA-RESULT.json -Raw | ConvertFrom-Json).status
+          }
+          $assessment=[pscustomobject]@{
+             schema='125a-akai-independent-test-lab-p015-v1'
+             source_commit='3c7ce9dae4086a918723d78d1ed53eb8196bab0a'
+             inventory_exit=$discoveryCode
+             inventory_status=$inventoryStatus
+             technical_exit=$technicalCode
+             technical_status=$technicalStatus
+             original_firmware_boot='NOT RUN - public ROM-free runner'
+             original_wav_capture='NOT RUN - public ROM-free runner'
+             native_akai_midi_audio='NOT RUN - public ROM-free runner'
+             akai_sample_project_recall='NOT RUN - source blocker persists'
+             complete_product_feature_matrix='NOT DECLARED'
+             release_approved=$false
+          }
+          $assessment | ConvertTo-Json | Set-Content results/AKAI-TEST-LAB-SCOPE.json
+          Write-Host "P015_AKAI_INVENTORY=$inventoryStatus exit=$discoveryCode"
+          Write-Host "P015_AKAI_TECHNICAL=$technicalStatus exit=$technicalCode"
+          if($discoveryCode -ne 0 -or $technicalCode -ne 0) {
+            throw 'Actual Akai native Test Lab baseline was not fully PASS: preserve honest FAILURE reports'
+          }
+      - name: Preserve complete independent P015 reports even when Akai native QA fails
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: 125A-Akai-P015-Independent-Test-Lab-Windows-P015-ROM-FREE
+          path: results/**
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Explicitly fail if Akai P74 product test failed
+        if: always()
+        env:
+          PRODUCT_OUTCOME: ${{ steps.real_product.outcome }}
+        shell: pwsh
+        run: |
+          if($env:PRODUCT_OUTCOME -ne 'success') { throw 'Akai P015 independent native QA incomplete/FAIL; do not release' }
+          Write-Host 'P015_TEST_LAB_NATIVE_BASELINE=PASS; ORIGINAL_ROM_WAV_MIDI_RECALL=NOT_RUN'
