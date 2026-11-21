@@ -133,9 +133,22 @@ inline bool originalProgramEditPage(std::string_view lcd) noexcept {
     return contains(lcd,"PROGRAM EDIT") && contains(lcd,"KEYGROUPS:")
        && contains(lcd,"TEST PROGRAM");
 }
+// Original V2.0 pads these value fields to fixed LCD columns. Compare
+// the actual numeric field after its caption, ignoring ONLY padding spaces.
+inline bool originalNumericFieldOne(std::string_view lcd,
+                                    std::string_view caption) noexcept {
+    for(std::size_t i=0;i+caption.size()<=lcd.size();++i){
+        if(!contains(lcd.substr(i,caption.size()),caption))continue;
+        std::size_t p=i+caption.size();
+        while(p<lcd.size() && lcd[p]==' ')++p;
+        return p<lcd.size() && lcd[p]=='1'
+            && (p+1==lcd.size() || lcd[p+1]<'0' || lcd[p+1]>'9');
+    }
+    return false;
+}
 inline bool originalKeygroupsPage(std::string_view lcd) noexcept {
-    return contains(lcd,"KEYGROUPS IN PROGRAM: 1")
-       && contains(lcd,"ACTIVE KEYGROUP NUMBER: 1")
+    return originalNumericFieldOne(lcd,"KEYGROUPS IN PROGRAM:")
+       && originalNumericFieldOne(lcd,"ACTIVE KEYGROUP NUMBER:")
        && contains(lcd,"SMPL") && contains(lcd,"TEST PROGRAM");
 }
 inline bool originalSampleZonePage(std::string_view lcd) noexcept {
