@@ -23,3 +23,8 @@ add_executable(akai_instance_audio_state_tests AkaiInstanceAudioStateTests.cpp)
 target_compile_features(akai_instance_audio_state_tests PRIVATE cxx_std_20)
 target_link_libraries(akai_instance_audio_state_tests PRIVATE Threads::Threads)
 add_test(NAME akai_instance_audio_state_contract COMMAND akai_instance_audio_state_tests)
+
+# P016 feasibility study only; no Akai engine integration
+add_executable(akai_midi_sds_tests AkaiMidiSdsTests.cpp)
+target_compile_features(akai_midi_sds_tests PRIVATE cxx_std_20)
+add_test(NAME akai_midi_sds_contract COMMAND akai_midi_sds_tests)

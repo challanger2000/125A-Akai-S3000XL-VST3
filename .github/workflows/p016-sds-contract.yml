@@ -1,0 +1,27 @@
+name: P016 Akai original MIDI SDS wire-codec C++ regression
+on:
+  push:
+    branches: ['feature/p016-native-midi-sds-**']
+    paths:
+      - 'Source/AkaiMidiSds.h'
+      - 'tests/AkaiMidiSdsTests.cpp'
+      - 'tests/CMakeLists.txt'
+      - '.github/workflows/p016-sds-contract.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  native-contracts:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure all native Akai C++ contracts
+        run: cmake -S tests -B build-core -DCMAKE_BUILD_TYPE=Release
+      - name: Build all native Akai C++ contracts
+        run: cmake --build build-core --config Release --parallel 2
+      - name: Run all native contracts, including SDS wire format
+        run: ctest --test-dir build-core -C Release --output-on-failure
