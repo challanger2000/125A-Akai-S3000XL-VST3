@@ -355,6 +355,7 @@ public:
     bool stageWavForOriginalSds(const juce::File& file, juce::String& error);
     std::atomic<bool> originalSdsRequested{false};
     std::atomic<int> originalSdsStage{0}; // 0 idle, 1 staged, 2 original UART, 3 transferred, 4 error
+    std::atomic<bool> originalSdsRecallRejected{false}; // DAW loaded a partial SDS state; report once in UI
     std::atomic<std::uint16_t> originalSdsNextSampleNumber{99};
     std::mutex originalSdsMutex;
     std::string originalSdsPendingPath;
