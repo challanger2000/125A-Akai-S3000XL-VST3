@@ -3374,6 +3374,14 @@ void EnsoniqSD1AudioProcessor::setStateInformation (const void* data, int sizeIn
 {
     std::unique_ptr<juce::XmlElement> xmlState (getXmlFromBinary (data, sizeInBytes));
     if (xmlState != nullptr) {
+        // P036: A DAW snapshot taken while original sample bytes were still
+        // on their way to Akai RAM deliberately contains NO machine image.
+        // Do not silently load such XML and let an old SINE or prior sample
+        // masquerade as a correctly restored user's WAV.
+        if(xmlState->getBoolAttribute("akai_native_sds_transfer_incomplete",false)) {
+            originalSdsRecallRejected.store(true,std::memory_order_release);
+            return; // fail-closed; leave currently running Akai state intact
+        }
         // Transactionally validate the whole original-MAME state BEFORE
         // changing APVTS, file paths or any old RAM recall controls.
         // Malformed data cannot silently fall back to partial guest RAM.
