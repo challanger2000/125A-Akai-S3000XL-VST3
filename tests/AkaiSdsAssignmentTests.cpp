@@ -48,6 +48,45 @@ int main(){
  d=a.step(sine,true,true,2670);CK(d.action==Action::DialIncrement);
  d=a.step(midi,true,true,3000);CK(d.stage==Phase::Verified && a.verified());
  CK(!a.running());
+ // P045 genuine owner-original V2.0 adversarial fixture:
+ // one-second `MIDI 99` needed two steps, but an independently imported
+ // two-second sample appeared only after FOUR actual DATA ENTRY steps.
+ // A fixed two-click assumption left SINE audible and the all-zero source
+ // falsely sounded like the nonzero source. Follow the live original LCD.
+ Assignment four;CK(four.start(0));
+ CK(four.step(select,true,true,100).action==Action::Down);
+ CK(four.step(select,true,true,450).action==Action::Up);
+ CK(four.step(select,true,true,600).action==Action::Down);
+ CK(four.step(edit,true,true,970).action==Action::Up);
+ CK(four.step(edit,true,true,1100).action==Action::Down);
+ CK(four.step(keygroup,true,true,1500).action==Action::Up);
+ CK(four.step(keygroup,true,true,1600).action==Action::Down);
+ CK(four.step(sine,true,true,1980).action==Action::Up);
+ CK(four.step(sine,true,true,2000).action==Action::DialIncrement); // first
+ CK(!four.verified());
+ CK(four.step(sine,true,true,2700).action==Action::DialIncrement); // second
+ CK(!four.verified());
+ CK(four.step(sine,true,true,3400).action==Action::DialIncrement); // third
+ CK(!four.verified());
+ CK(four.step(sine,true,true,4100).action==Action::DialIncrement); // fourth
+ CK(!four.verified());
+ CK(four.step(midi,true,true,4500).stage==Phase::Verified && four.verified());
+ CK(four.step(sine,true,true,5200).stage==Phase::Verified); // sticky once proven
+ Assignment missingLong;CK(missingLong.start(0));
+ CK(missingLong.step(select,true,true,100).action==Action::Down);
+ CK(missingLong.step(select,true,true,450).action==Action::Up);
+ CK(missingLong.step(select,true,true,600).action==Action::Down);
+ CK(missingLong.step(edit,true,true,970).action==Action::Up);
+ CK(missingLong.step(edit,true,true,1100).action==Action::Down);
+ CK(missingLong.step(keygroup,true,true,1500).action==Action::Up);
+ CK(missingLong.step(keygroup,true,true,1600).action==Action::Down);
+ CK(missingLong.step(sine,true,true,1980).action==Action::Up);
+ CK(missingLong.step(sine,true,true,2000).action==Action::DialIncrement);
+ CK(missingLong.step(sine,true,true,2700).action==Action::DialIncrement);
+ CK(missingLong.step(sine,true,true,3400).action==Action::DialIncrement);
+ CK(missingLong.step(sine,true,true,4100).action==Action::DialIncrement);
+ CK(missingLong.step(sine,true,true,4800).stage==Phase::Failed);
+ CK(!missingLong.verified()); // no fifth blind turn / no false MIDI 99
  Assignment fault;CK(fault.start(0));
  CK(fault.step(select,false,true,100).stage==Phase::Failed);
  CK(fault.start(200));

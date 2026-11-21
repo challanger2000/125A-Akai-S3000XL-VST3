@@ -12,6 +12,7 @@ on:
       - 'Source/AkaiInstanceAudioState.h'
       - 'Source/AkaiMachineState.h'
       - 'tests/**'
+      - 'qa/private_original_rom_sds_source_recall.py'
   pull_request:
     paths:
       - '.github/workflows/core-contracts.yml'
@@ -23,6 +24,7 @@ on:
       - 'Source/AkaiInstanceAudioState.h'
       - 'Source/AkaiMachineState.h'
       - 'tests/**'
+      - 'qa/private_original_rom_sds_source_recall.py'
 permissions:
   contents: read
 jobs:
@@ -41,3 +43,7 @@ jobs:
       - name: Run native tests
         run: ctest --test-dir build-core -C Release --output-on-failure
 
+      - name: P045 original-ROM runner syntax and CLI (ROM-free only)
+        run: |
+          python -m py_compile qa/private_original_rom_sds_source_recall.py
+          python qa/private_original_rom_sds_source_recall.py --help
