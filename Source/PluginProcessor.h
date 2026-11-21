@@ -42,6 +42,7 @@
 #include "AkaiWavInput.h"
 #include "AkaiWavCaptureState.h"
 #include "AkaiCaptureAutomation.h"
+#include "AkaiMidiSampleDump.h"
 #include "AkaiInstanceAudioState.h"
 #include "AkaiMachineState.h"
 
@@ -349,6 +350,16 @@ public:
     // through the MAME microphone/A-D path only AFTER original firmware GO.
     // Double-buffered immutable assets; no locks/allocations on MAME/audio threads.
     bool stageWavForCapture(const juce::File& file, juce::String& error);
+    // P030: offline WAV -> genuine MIDI SDS file, then only the original
+    // Akai UART and firmware allocates/writes sample RAM. No A/D fake recording.
+    bool stageWavForOriginalSds(const juce::File& file, juce::String& error);
+    std::atomic<bool> originalSdsRequested{false};
+    std::atomic<int> originalSdsStage{0}; // 0 idle, 1 staged, 2 original UART, 3 transferred, 4 error
+    std::atomic<std::uint16_t> originalSdsNextSampleNumber{99};
+    std::mutex originalSdsMutex;
+    std::string originalSdsPendingPath;
+    std::uint64_t originalSdsPendingDurationMs=0;
+    juce::String originalSdsLastWavName;
     void clearStagedWav() noexcept;
     // The automation may only read the ACTUAL armed WAV asset after the
     // MAME source thread has acknowledged the new immutable input slot.
