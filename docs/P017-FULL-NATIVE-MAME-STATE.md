@@ -52,3 +52,11 @@ A new native regression covers both orderings, failed I/O and cancellation.
 This is an IPC/source-level correctness improvement only: MAME 0.288
 immediate_load has no success return value and successful original-ROM V2.0
 load, playable PCM, keygroup mapping and portable project recall remain OPEN.
+
+// MAME 0.288 API review: immediate_load calls handle_saveload, but anonymous
+// scheduler timers can leave save_or_load_pending() true. P020 therefore tracks
+// each in-flight native load on the MAME owner thread and does not schedule any
+// competing native save or legacy state operation while MAME owns a pending
+// load. These structural checks need ROM-backed confirmation: the public
+// MAME API has no load-success result and an aborted pending load can be
+// observed as merely no longer pending. Project/PCM certification remains OPEN.

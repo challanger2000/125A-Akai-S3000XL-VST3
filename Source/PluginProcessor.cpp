@@ -798,6 +798,7 @@ private:
     int audioMacroHeldBank = -1;   // audio-thread-only: which bank is electronically held
     akai::capture::Controller captureController; // MAME/OSD owner thread only
     int captureHeldIndex = -1; // only release buttons this controller pressed
+    akai::machine_state::RestoreMailbox::Work nativeRestoreInFlight{}; // MAME owner only
     
     render_target* main_target = nullptr;
 
@@ -947,30 +948,47 @@ public:
         // P017 native full MAME snapshot. Never use unsafe guest-RAM reads
         // to simulate a complete project state. All MAME save/restore operations
         // run ONLY on this MAME owner thread, outside the host audio callback.
-        if (const auto work=processor->nativeRestore.take()) {
-            bool issued=false;
-            if(work.bytes->size()>=32
-               && work.bytes->size()<=akai::machine_state::maxSnapshot) {
-                auto dest=processor->nativeSnapshotFile();
-                if(dest.getParentDirectory().createDirectory().wasOk()) {
-                    dest.deleteFile(); // no stale snapshot on failed write
-                    auto stream=dest.createOutputStream();
-                    if(stream && stream->openedOk()
-                        && stream->write(work.bytes->data(),work.bytes->size())) {
-                        stream->flush();
-                        stream.reset();
-                        mame_machine->immediate_load(dest.getFullPathName().toStdString());
-                        // MAME 0.288 immediate_load returns void. This only
-                        // proves the call was issued, NOT that the guest
-                        // firmware or sample RAM was restored correctly.
-                        issued=true;
+        // MAME 0.288 immediate_load is NOT guaranteed immediate:
+        // pending anonymous timers can defer it to a later machine timeslice.
+        // Never let a subsequent save or new load overwrite that pending LOAD.
+        if (nativeRestoreInFlight && !mame_machine->save_or_load_pending()) {
+            processor->nativeRestore.finish(nativeRestoreInFlight,true);
+            nativeRestoreInFlight={};
+        }
+        if (!nativeRestoreInFlight && !mame_machine->save_or_load_pending()) {
+            if (const auto work=processor->nativeRestore.take()) {
+                bool issued=false;
+                if(work.bytes->size()>=32
+                   && work.bytes->size()<=akai::machine_state::maxSnapshot) {
+                    auto dest=processor->nativeSnapshotFile();
+                    if(dest.getParentDirectory().createDirectory().wasOk()) {
+                        dest.deleteFile(); // no stale snapshot on failed write
+                        auto stream=dest.createOutputStream();
+                        if(stream && stream->openedOk()
+                            && stream->write(work.bytes->data(),work.bytes->size())) {
+                            stream->flush();
+                            stream.reset();
+                            mame_machine->immediate_load(
+                                dest.getFullPathName().toStdString());
+                            issued=true;
+                        }
                     }
                 }
+                if (!issued) {
+                    processor->nativeRestore.finish(work,false);
+                } else if (mame_machine->save_or_load_pending()) {
+                    // Keep the owner image alive until the scheduler resolves
+                    // the load (or aborts it). Completion is not PCM proof.
+                    nativeRestoreInFlight=work;
+                } else {
+                    processor->nativeRestore.finish(work,true);
+                }
             }
-            processor->nativeRestore.finish(work,issued);
         }
         const auto seq=processor->nativeSnapshotRequested.load(std::memory_order_acquire);
-        if(seq!=processor->nativeSnapshotFinished.load(std::memory_order_acquire)) {
+        if(seq!=processor->nativeSnapshotFinished.load(std::memory_order_acquire)
+           && akai::machine_state::mayStartSnapshot(
+               mame_machine->save_or_load_pending(),bool(nativeRestoreInFlight))) {
             auto dest=processor->nativeSnapshotFile();
             bool written=false;
             if(dest.getParentDirectory().createDirectory().wasOk() &&
@@ -986,7 +1004,10 @@ public:
         }
 
         // --- SYNCHRONIZED MAME STATE SAVING ---
-        if (processor->requestMameSave.load(std::memory_order_acquire)) {
+        if (processor->requestMameSave.load(std::memory_order_acquire)
+            && akai::machine_state::mayStartSnapshot(
+               mame_machine->save_or_load_pending(),bool(nativeRestoreInFlight))
+            && !processor->nativeRestore.needsService()) {
         if (saveFrameDelay == 0) { // Only call it the first time
             mame_machine->schedule_save("vst_temp");
             saveFrameDelay = 3;
@@ -1003,7 +1024,10 @@ public:
                 }
 
         // --- SYNCHRONIZED MAME STATE LOADING ---
-        if (processor->requestMameLoad.load(std::memory_order_acquire)) {
+        if (processor->requestMameLoad.load(std::memory_order_acquire)
+            && akai::machine_state::mayStartSnapshot(
+               mame_machine->save_or_load_pending(),bool(nativeRestoreInFlight))
+            && !processor->nativeRestore.needsService()) {
             if (loadFrameDelay == 0) { // Only call it the first time
                 mame_machine->schedule_load("vst_temp");
                 loadFrameDelay = 3;

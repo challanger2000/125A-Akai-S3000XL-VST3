@@ -43,6 +43,10 @@ int main(){
     ck(encode(payload,envelope),"minimal_32byte_mame_save");
     ck(decode(envelope,decoded)&&decoded==payload,"minimal_save_replaces_previous");
     // P020: project A restore may finish after project B has superseded it.
+    ck(mayStartSnapshot(false,false),"save_when_mame_idle");
+    ck(!mayStartSnapshot(true,false),"pending_mame_load_blocks_new_save");
+    ck(!mayStartSnapshot(false,true),"inflight_original_load_blocks_save");
+    ck(!mayStartSnapshot(true,true),"both_inflight_blocks_save");
     RestoreMailbox mb;
     auto first=std::make_shared<const std::vector<std::uint8_t>>(32,11);
     auto second=std::make_shared<const std::vector<std::uint8_t>>(32,22);

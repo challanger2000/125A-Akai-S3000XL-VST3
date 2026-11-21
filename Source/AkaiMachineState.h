@@ -58,6 +58,13 @@ inline bool decode(std::span<const std::uint8_t> bytes,std::vector<std::uint8_t>
     out.swap(temp);return true;
 }
 
+// Native save/load must not replace an outstanding firmware load. The MAME
+// public save_or_load_pending() flag remains true if immediate_load deferred
+// execution because of anonymous scheduler timers.
+inline constexpr bool mayStartSnapshot(bool mamePending, bool nativeRestoreInFlight) noexcept {
+    return !mamePending && !nativeRestoreInFlight;
+}
+
 // P020: one authoritative, generation-tagged owner-thread restore mailbox.
 // A previous restore may finish while a newer DAW project has arrived;
 // acknowledging the older work must never cancel the newer restore.
