@@ -481,6 +481,15 @@ void EnsoniqSD1AudioProcessorEditor::timerCallback()
     bool checkFailed = audioProcessor.isSelfCheckFailed.load(std::memory_order_acquire);
     bool unsupportedHost = audioProcessor.isUnsupportedAUHost.load(std::memory_order_acquire);
         
+    // P030: MIDI SDS transport state is not a sample/program success receipt.
+    // The original firmware alone may confirm actual keygroup assignment.
+    const int sdsStage=audioProcessor.originalSdsStage.load(std::memory_order_acquire);
+    if(sdsStage>=1 && sdsStage<=4) {
+        if(sdsStage==1) loadMediaButton.setButtonText("SDS READY");
+        if(sdsStage==2) loadMediaButton.setButtonText("SDS SEND");
+        if(sdsStage==3) loadMediaButton.setButtonText("SDS SENT");
+        if(sdsStage==4) loadMediaButton.setButtonText("SDS ERROR");
+    }
     // P004 display only original firmware-verified recording phases.
     // GUI timer never advances the firmware or presses hardware controls.
     const auto captureStage=static_cast<akai::capture::Stage>(
@@ -501,7 +510,7 @@ void EnsoniqSD1AudioProcessorEditor::timerCallback()
             loadMediaButton.setButtonText("WAV ARM");
     } else if(captured)
         loadMediaButton.setButtonText("WAV DONE");
-    else
+    else if(sdsStage==0)
         loadMediaButton.setButtonText("MEDIA");
     // One precise message per failure, never a repeated modal at 30 Hz.
     const int statusCode=int(captureStage);
