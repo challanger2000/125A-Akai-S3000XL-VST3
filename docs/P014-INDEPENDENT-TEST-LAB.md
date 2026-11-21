@@ -10,7 +10,7 @@ binary from that GitHub Actions run ONLY after both the exact SHA and the
 full-build conclusion were checked, and records its actual SHA-256.
 
 The independent Test Lab is checked out by commit
-`challanger2000/125A-Plugin-Test-Lab@7213fe1f81f4036f74431cb5b2d7dbd09b73ee5c`.
+`challanger2000/125A-Plugin-Test-Lab@9f84737b67588c5a3ab5649664bfe3032e529790`.
 It builds native Windows x64 VST3 GUI, audio and state-stress test hosts
 from source. A known working VST3 must pass; a deliberately defective
 VST3 must fail. Actual Akai bundle then receives separate P74 read-only
@@ -42,3 +42,9 @@ reported as passes. Hardware ASIO is also NOT RUN.
 - Artifact: `125A-Akai-P014-Independent-Test-Lab-Windows-P013-ROM-FREE`
   contains actual original P74 reports, known-good and defective controls,
   product module SHA-256 and explicit feature gaps.
+
+## P014/P100 real multibus QA follow-up (2026-11-21)
+- First exact-P013 P014 run had a script exit-code false failure despite correctly rejecting the six-profile defective state fixture. This was repaired with real native P32 fault assertions.
+- Second exact-P013 P014 run [44904489252](https://github.com/challanger2000/125A-Akai-S3000XL-VST3/actions/runs/44904489252) independently inventoried the Akai module, 2128 parameters and 11 buses overall (1 stereo input, 1 16-channel MIDI event input, 1 stereo main output + 8 mono individual outputs). It correctly refused the native P25 state stress in all six profiles because the original Lab host supported only ONE audio output bus. **This was Test Lab incompatibility, not Akai DSP failure; no actual process callbacks occurred.**
+- Independent Test Lab [P100 successful Windows run](https://github.com/challanger2000/125A-Plugin-Test-Lab/actions/runs/44904836039), source SHA `9f84737b67588c5a3ab5649664bfe3032e529790`, adds bounded 1–16 mono/stereo output buses, explicitly supplies every bus to native process(), and verifies all returned output channels, not just MAIN L/R. Independent real VST3 tests PASS for nine-bus good, intentionally nonfinite auxiliary output (correctly rejected), and legacy stereo good.
+- Akai P014 now pins precisely the independently verified Test Lab P100 revision. Rerun native Akai P74 against **unchanged P013 module SHA256 `fb8081aa4edce880b438093ebcc6516422ad59e0de18514f55ab59c1aaaa3521`**. A passing generic native test still cannot establish a ROM-backed Sampler.

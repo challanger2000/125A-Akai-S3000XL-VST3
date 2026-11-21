@@ -18,7 +18,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: challanger2000/125A-Plugin-Test-Lab
-          ref: 7213fe1f81f4036f74431cb5b2d7dbd09b73ee5c
+          ref: 9f84737b67588c5a3ab5649664bfe3032e529790
           path: test-lab
           persist-credentials: false
       - name: Build genuine native Steinberg VST3 GUI, audio, state-stress hosts and good/bad controls
@@ -73,7 +73,7 @@ jobs:
           }
           $hash=(Get-FileHash -LiteralPath $module[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant()
           New-Item -ItemType Directory -Force -Path results | Out-Null
-          [pscustomobject]@{source_run=$run;source_sha=$pinned;test_lab_sha='7213fe1f81f4036f74431cb5b2d7dbd09b73ee5c';module_sha256=$hash;private_roms_in_ci=$false;real_original_firmware_test='NOT RUN'} |
+          [pscustomobject]@{source_run=$run;source_sha=$pinned;test_lab_sha='9f84737b67588c5a3ab5649664bfe3032e529790';module_sha256=$hash;private_roms_in_ci=$false;real_original_firmware_test='NOT RUN'} |
             ConvertTo-Json | Set-Content results/PROVENANCE.json
           Write-Host "P014_PINNED_PUBLIC_MODULE_SHA256=$hash"
       - name: Verify independent laboratory catches deliberately defective VST3 state machine
