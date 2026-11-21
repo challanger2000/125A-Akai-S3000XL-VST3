@@ -3272,9 +3272,27 @@ bool EnsoniqSD1AudioProcessor::extractLegacyMameState(const juce::String& base64
 //==============================================================================
 void EnsoniqSD1AudioProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
-    // 1. Save VST parameters to XML
+    // 1. Save VST parameters to XML.
     auto state = apvts.copyState();
     std::unique_ptr<juce::XmlElement> xml (state.createXml());
+    // P044: the original MAME .sta contains the device's m_last_dial but
+    // NOT the host's external analog input position. An imported MIDI 99
+    // can turn back to PULSE on next restore if the two disagree.
+    const int physicalDialAtSave=dialValue.load(std::memory_order_acquire)&0xff;
+    xml->setAttribute("akai_native_dial_position",physicalDialAtSave);
+    // The original firmware's automated keygroup assignment moves the
+    // physical dial off the MAME owner thread without rewriting JUCE's
+    // data_entry parameter. Synchronize the *serialized copy*, not the
+    // live host parameter, so project automation and saved device agree.
+    for(auto* param=xml->getFirstChildElement();param!=nullptr;
+        param=param->getNextElement()) {
+        if(param->hasTagName("PARAM") &&
+           param->getStringAttribute("id")=="data_entry") {
+            param->setAttribute("value",akai::dial_recall::normalized(
+                physicalDialAtSave));
+            break;
+        }
+    }
 
     // --- 1. VERSION STAMPING ---
     xml->setAttribute("plugin_version", "1.0.0");
@@ -3418,6 +3436,21 @@ void EnsoniqSD1AudioProcessor::setStateInformation (const void* data, int sizeIn
         // Malformed data cannot silently fall back to partial guest RAM.
         std::shared_ptr<const std::vector<std::uint8_t>> validatedNative;
         const bool hasNative=xmlState->hasAttribute("akai_native_machine_v1");
+        int savedPhysicalDial=0;
+        bool haveSavedPhysicalDial=false;
+        // The host-controlled endless dial is part of the native-machine
+        // restore contract. Reject corrupted new-format values BEFORE
+        // touching the running Akai machine or project parameters.
+        if(hasNative && xmlState->hasAttribute("akai_native_dial_position")) {
+            const auto numeric=xmlState->getStringAttribute(
+                "akai_native_dial_position");
+            if(numeric.isEmpty() || numeric.length()>3)return;
+            for(auto ch:numeric)
+                if(ch<'0' || ch>'9')return;
+            savedPhysicalDial=numeric.getIntValue();
+            if(!akai::dial_recall::validPosition(savedPhysicalDial))return;
+            haveSavedPhysicalDial=true;
+        }
         if(hasNative) {
             const auto encoded=xmlState->getStringAttribute("akai_native_machine_v1");
             if(encoded.length()>static_cast<int>(akai::machine_state::maxSnapshot*2))
@@ -3433,14 +3466,18 @@ void EnsoniqSD1AudioProcessor::setStateInformation (const void* data, int sizeIn
             validatedNative=std::make_shared<const std::vector<std::uint8_t>>(
                 std::move(raw));
         }
+        // 1. Restore VST Automation Parameters. For P044-format projects,
+        // the saved PARAM data_entry was also synchronized with the exact
+        // physical dial. It must be applied BEFORE publishing the native
+        // MAME restore to avoid a worker-thread race to the old host value.
+        if (xmlState->hasTagName (apvts.state.getType())) {
+            apvts.replaceState (juce::ValueTree::fromXml (*xmlState));
+        }
+        if(haveSavedPhysicalDial)
+            dialValue.store(savedPhysicalDial,std::memory_order_release);
         {
             std::lock_guard<std::mutex> hostGuard(nativeStateHostMutex);
             nativeRestore.publish(std::move(validatedNative));
-        }
-
-        // 1. Restore VST Automation Parameters
-        if (xmlState->hasTagName (apvts.state.getType())) {
-            apvts.replaceState (juce::ValueTree::fromXml (*xmlState));
         }
 
         // 2. Restore UI Dimensions
