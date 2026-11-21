@@ -43,6 +43,7 @@
 #include "AkaiWavCaptureState.h"
 #include "AkaiCaptureAutomation.h"
 #include "AkaiInstanceAudioState.h"
+#include "AkaiMachineState.h"
 
 //==============================================================================
 
@@ -130,6 +131,22 @@ public:
     std::atomic<bool> requestMameLoad{ false };
     std::atomic<bool> mameStateIsReady{ false };
     juce::WaitableEvent mameStateEvent{ false };
+    // P017 native original-MAME .sta: dedicated IPC, never share legacy vst_temp.
+    // Request/complete generations distinguish a late save from the requested
+    // one. Emulation-thread owns the actual MAME save/load, not the DAW thread.
+    std::atomic<std::uint32_t> nativeSnapshotRequested{0};
+    std::atomic<std::uint32_t> nativeSnapshotFinished{0};
+    std::atomic<bool> nativeSnapshotSucceeded{false};
+    juce::WaitableEvent nativeSnapshotEvent{false};
+    std::atomic<bool> nativeRestoreRequested{false};
+    std::mutex nativeRestoreMutex;
+    std::shared_ptr<const std::vector<std::uint8_t>> nativePendingRestore;
+    std::mutex nativeStateHostMutex;
+    juce::File nativeSnapshotFile() const {
+        return juce::File(instanceTempDir).getChildFile("state")
+            .getChildFile("akai-native-project.sta");
+    }
+
     
     // Countdown timer (in samples) to trigger a delayed MIDI Panic after a state load
     std::atomic<int> panicDelaySamples{ 0 };

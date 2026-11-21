@@ -938,6 +938,45 @@ public:
 #endif // SD1_DEBUG_RACK_PANEL
                 }
                         
+        // P017 native full MAME snapshot. Never use unsafe guest-RAM reads
+        // to simulate a complete project state. All MAME save/restore operations
+        // run ONLY on this MAME owner thread, outside the host audio callback.
+        if (processor->nativeRestoreRequested.exchange(false,std::memory_order_acq_rel)) {
+            std::shared_ptr<const std::vector<std::uint8_t>> raw;
+            {
+                std::lock_guard<std::mutex> guard(processor->nativeRestoreMutex);
+                raw=processor->nativePendingRestore;
+            }
+            if(raw && raw->size()>=32
+               && raw->size()<=akai::machine_state::maxSnapshot) {
+                auto dest=processor->nativeSnapshotFile();
+                if(dest.getParentDirectory().createDirectory()) {
+                    dest.deleteFile(); // no stale snapshot on failed write
+                    auto stream=dest.createOutputStream();
+                    if(stream && stream->openedOk()
+                        && stream->write(raw->data(),raw->size())) {
+                        stream->flush();
+                        stream.reset();
+                        mame_machine->immediate_load(dest.getFullPathName().toStdString());
+                    }
+                }
+            }
+        }
+        const auto seq=processor->nativeSnapshotRequested.load(std::memory_order_acquire);
+        if(seq!=processor->nativeSnapshotFinished.load(std::memory_order_acquire)) {
+            auto dest=processor->nativeSnapshotFile();
+            bool written=false;
+            if(dest.getParentDirectory().createDirectory()) {
+                dest.deleteFile(); // stale successful save must never count as new
+                mame_machine->immediate_save(dest.getFullPathName().toStdString());
+                written=dest.existsAsFile() && dest.getSize()>=32
+                    && dest.getSize()<=static_cast<juce::int64>(akai::machine_state::maxSnapshot);
+            }
+            processor->nativeSnapshotSucceeded.store(written,std::memory_order_release);
+            processor->nativeSnapshotFinished.store(seq,std::memory_order_release);
+            processor->nativeSnapshotEvent.signal();
+        }
+
         // --- SYNCHRONIZED MAME STATE SAVING ---
         if (processor->requestMameSave.load(std::memory_order_acquire)) {
         if (saveFrameDelay == 0) { // Only call it the first time
@@ -1835,6 +1874,9 @@ void EnsoniqSD1AudioProcessor::shutdownMame()
                 
         mameThrottleEvent.signal();
         mameStateEvent.signal();
+        // Abort any host waiting on this particular MAME instance.
+        nativeSnapshotSucceeded.store(false,std::memory_order_release);
+        nativeSnapshotEvent.signal();
         
         if (mameThread.joinable()) {
             mameThread.join();
@@ -2859,6 +2901,58 @@ void EnsoniqSD1AudioProcessor::getStateInformation (juce::MemoryBlock& destData)
         xml->setAttribute("is_cart_loaded", isCartLoaded.load());
     }
 
+    // P017: capture the full original-MAME machine state, including Akai
+    // sample RAM, DSP and CPU registers, not merely old Ensoniq NVRAM.
+    // MAME owner thread performs the operation. This host callback never
+    // reads/writes MAME registers directly for the native snapshot.
+    {
+        std::lock_guard<std::mutex> hostLock(nativeStateHostMutex);
+        juce::MemoryBlock machineBytes;
+        bool haveMachine=false;
+        if(isMameRunningFlag() && mameIsFullyBooted.load(std::memory_order_acquire)) {
+            const auto seq=nativeSnapshotRequested.fetch_add(
+                1,std::memory_order_acq_rel)+1;
+            nativeSnapshotEvent.reset();
+            constexpr int timeoutMs=6000;
+            int waited=0;
+            while(waited<timeoutMs &&
+                  nativeSnapshotFinished.load(std::memory_order_acquire)!=seq) {
+                (void)nativeSnapshotEvent.wait(200);
+                waited+=200;
+            }
+            if(nativeSnapshotFinished.load(std::memory_order_acquire)==seq &&
+               nativeSnapshotSucceeded.load(std::memory_order_acquire)) {
+                const auto path=nativeSnapshotFile();
+                if(path.existsAsFile() && path.getSize()>=32
+                   && path.getSize()<=static_cast<juce::int64>(
+                       akai::machine_state::maxSnapshot)) {
+                    haveMachine=path.loadFileAsData(machineBytes);
+                }
+            }
+        } else {
+            // Preserve an incoming snapshot when DAW saves before firmware boot.
+            std::lock_guard<std::mutex> pendingLock(nativeRestoreMutex);
+            if(nativePendingRestore && !nativePendingRestore->empty()) {
+                machineBytes.append(nativePendingRestore->data(),
+                                    nativePendingRestore->size());
+                haveMachine=true;
+            }
+        }
+        std::vector<std::uint8_t> envelope;
+        if(haveMachine && akai::machine_state::encode(
+            std::span<const std::uint8_t>(
+                static_cast<const std::uint8_t*>(machineBytes.getData()),
+                machineBytes.getSize()),envelope)) {
+            const juce::MemoryBlock encoded(envelope.data(),envelope.size());
+            xml->setAttribute("akai_native_machine_v1",encoded.toBase64Encoding());
+            xml->setAttribute("akai_native_complete",true);
+        } else {
+            // A missing snapshot must be VISIBLE to later QA. Old RAM
+            // fragments are NOT a playable Akai project snapshot.
+            xml->setAttribute("akai_native_complete",false);
+        }
+    }
+
     // --- 4. DIRECT RAM EXTRACTION (Version Independent) ---
         if (isMameRunningFlag() && mameMachine != nullptr) {
             
@@ -2912,7 +3006,33 @@ void EnsoniqSD1AudioProcessor::setStateInformation (const void* data, int sizeIn
 {
     std::unique_ptr<juce::XmlElement> xmlState (getXmlFromBinary (data, sizeInBytes));
     if (xmlState != nullptr) {
-        
+        // Transactionally validate the whole original-MAME state BEFORE
+        // changing APVTS, file paths or any old RAM recall controls.
+        // Malformed data cannot silently fall back to partial guest RAM.
+        std::shared_ptr<const std::vector<std::uint8_t>> validatedNative;
+        const bool hasNative=xmlState->hasAttribute("akai_native_machine_v1");
+        if(hasNative) {
+            const auto encoded=xmlState->getStringAttribute("akai_native_machine_v1");
+            if(encoded.length()>static_cast<int>(akai::machine_state::maxSnapshot*2))
+                return;
+            juce::MemoryBlock decoded;
+            if(!decoded.fromBase64Encoding(encoded))
+                return;
+            std::vector<std::uint8_t> raw;
+            if(!akai::machine_state::decode(std::span<const std::uint8_t>(
+                static_cast<const std::uint8_t*>(decoded.getData()),
+                decoded.getSize()),raw))
+                return;
+            validatedNative=std::make_shared<const std::vector<std::uint8_t>>(
+                std::move(raw));
+        }
+        {
+            std::lock_guard<std::mutex> hostGuard(nativeStateHostMutex);
+            std::lock_guard<std::mutex> pendingGuard(nativeRestoreMutex);
+            nativePendingRestore=std::move(validatedNative);
+            nativeRestoreRequested.store(hasNative,std::memory_order_release);
+        }
+
         // 1. Restore VST Automation Parameters
         if (xmlState->hasTagName (apvts.state.getType())) {
             apvts.replaceState (juce::ValueTree::fromXml (*xmlState));
@@ -2999,7 +3119,7 @@ void EnsoniqSD1AudioProcessor::setStateInformation (const void* data, int sizeIn
                         isWarmBoot.store(true, std::memory_order_release); // LOAD STATE FLAG
                     }
                 }
-                else if (xmlState->hasAttribute("ram_osram")) {
+                else if (!hasNative && xmlState->hasAttribute("ram_osram")) {
                     
                     // LOAD FROM NEW XML FORMAT
                     pendingOsram.fromBase64Encoding(xmlState->getStringAttribute("ram_osram"));

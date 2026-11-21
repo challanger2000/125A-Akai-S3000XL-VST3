@@ -10,6 +10,7 @@ on:
       - 'Source/AkaiWavCaptureState.h'
       - 'Source/AkaiCaptureAutomation.h'
       - 'Source/AkaiInstanceAudioState.h'
+      - 'Source/AkaiMachineState.h'
       - 'tests/**'
   pull_request:
     paths:
@@ -20,6 +21,7 @@ on:
       - 'Source/AkaiWavCaptureState.h'
       - 'Source/AkaiCaptureAutomation.h'
       - 'Source/AkaiInstanceAudioState.h'
+      - 'Source/AkaiMachineState.h'
       - 'tests/**'
 permissions:
   contents: read
