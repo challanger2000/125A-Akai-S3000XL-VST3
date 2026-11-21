@@ -24,7 +24,8 @@ jobs:
             libsdl2-dev libsdl2-ttf-dev libasound2-dev libpulse-dev \
             libflac-dev libjpeg-dev libsqlite3-dev liblua5.4-dev \
             libx11-dev libxi-dev libxrandr-dev libxinerama-dev libxcursor-dev \
-            libudev-dev libportmidi-dev libjack-jackd2-dev
+            libudev-dev libportmidi-dev libjack-jackd2-dev \
+            qt6-base-dev qt6-base-dev-tools
       - name: Clone exact upstream MAME 0.288 and apply same original-hardware patch
         shell: bash
         run: |
@@ -38,7 +39,8 @@ jobs:
           set -euxo pipefail
           make -C external/mame -j3 \
              SUBTARGET=s3000xl SOURCES=src/mame/akai/s3000.cpp \
-             OSD=sdl USE_QTDEBUG=0 NO_X11=1 NOWERROR=1
+             OSD=sdl USE_QTDEBUG=0 NO_X11=1 NOWERROR=1 \
+             CXXFLAGS='-std=c++20'
           ls -lh external/mame/mames3000xl
       - name: Verify original firmware owner can boot this binary without cloud ROM sharing
         shell: bash
