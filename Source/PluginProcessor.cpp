@@ -245,8 +245,19 @@ bool EnsoniqSD1AudioProcessor::stageWavForCapture(const juce::File& file,
                   "The current Akai recording was preserved.";
             return false;
         }
+        // The ORIGINAL Akai RECORD SET-UP time is entered in hundredths
+        // of a second, as confirmed with physical panel keys on V2.0 ROM.
+        // Add 0.25 s headroom to avoid losing the WAV tail to time rounding.
+        const auto centis=(std::uint64_t(prepared->frames())*100u
+            +prepared->rate-1u)/prepared->rate;
+        if(centis==0 || centis+25u>99999u) {
+            error="WAV duration exceeds native Akai 999.99-second REC TIME.";
+            return false;
+        }
         const int inactive=wavCurrentSlot.load(std::memory_order_acquire)==0?1:0;
         wavSlots[inactive]=std::move(prepared);
+        wavTargetRecordCentis.store(std::uint32_t(centis+25u),
+                                    std::memory_order_release);
         stagedWavName=file.getFileName();
         wavFramesDelivered.store(0,std::memory_order_release);
         wavState.store(1,std::memory_order_release);
@@ -1409,7 +1420,9 @@ public:
                     processor->autoCaptureStage.store(int(action.stage),std::memory_order_release);
                 }
                 if(processor->autoCaptureRequest.exchange(false,std::memory_order_acq_rel)) {
-                    if(captureController.start(nowMs))
+                    if(captureController.start(nowMs,
+                         processor->wavTargetRecordCentis.load(
+                             std::memory_order_acquire)))
                         processor->autoCaptureStage.store(
                             int(captureController.stage()),std::memory_order_release);
                 }
@@ -1440,6 +1453,8 @@ public:
                         case akai::capture::Button::GoF7:tag="btn_f7";break;
                         case akai::capture::Button::Name:tag="btn_name";break;
                         case akai::capture::Button::Enter:tag="btn_enter";break;
+                        case akai::capture::Button::CursorDown:tag="btn_down";break;
+                        case akai::capture::Button::CursorRight:tag="btn_right";break;
                         case akai::capture::Button::Digit0:tag="btn_key0";break;
                         case akai::capture::Button::Digit1:tag="btn_key1";break;
                         case akai::capture::Button::Digit2:tag="btn_key2";break;

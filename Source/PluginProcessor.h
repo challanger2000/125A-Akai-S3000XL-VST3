@@ -370,6 +370,7 @@ public:
     juce::String stagedWavName;
     std::atomic<int> wavState{0}; // 0 none, 1 armed, 2 recording, 3 source finished
     std::atomic<std::uint64_t> wavFramesDelivered{0};           // returns frames actually supplied
+    std::atomic<std::uint32_t> wavTargetRecordCentis{0}; // off-thread WAV length, firmware SET-UP only
     uint64_t getSamplerInWritten() const { return samplerInWritten.load(std::memory_order_acquire); }
     uint64_t getSamplerInRead()    const { return samplerInRead.load(std::memory_order_acquire); }
 
