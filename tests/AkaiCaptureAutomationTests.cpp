@@ -49,6 +49,7 @@ int main(){
        bootDecision.button==Button::RecF2,
        "firmware_loss_releases_owned_key");
 
+    {
     // P023 actual ORIGINAL ROM V2.0 headless LCD regression.
     // Owner's ROM boot was measured: at 4s "OPERATING SYSTEM 2.00",
     // at 9-23s "waiting for hard disk ready.. SKIP". A real F8 at
@@ -62,7 +63,7 @@ int main(){
     Controller bootCapture;
     ck(bootCapture.start(0),"boot_hdd_capture_start");
     auto boot=at("PROGRAMS IN MEMORY OPERATING SYSTEM 2.00");
-    r=bootCapture.step(boot,100);
+    auto r=bootCapture.step(boot,100);
     ck(r.stage==Stage::WaitWav && r.command==Command::None,
        "no_sample_during_original_rom_startup");
     r=bootCapture.step(at("PROGRAMS IN MEMORY waiting for hard disk ready.. SKIP"),300);
@@ -96,6 +97,7 @@ int main(){
     ck(isRunningStage(Stage::PressBootSkip) &&
        isRunningStage(Stage::WaitBootReady),
        "wav_replacement_locked_during_boot_skip");
+    }
     Controller c;
     ck(c.start(0),"begin");
     auto r=c.step(at("RECORD SET-UP"),0);
