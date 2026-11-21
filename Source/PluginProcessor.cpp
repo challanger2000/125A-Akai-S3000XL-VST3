@@ -316,11 +316,15 @@ bool EnsoniqSD1AudioProcessor::stageWavForOriginalSds(
         const auto prepared=akai::wav::prepare(audio,44100); // original Akai mono 44.1k
         const auto number=originalSdsNextSampleNumber.load(std::memory_order_acquire);
         const auto dump=akai::sds::encodeStereoAsMono(
-            prepared.stereo,44100,number,0); // owner-ROM tested SysEx logical ID ZERO
+            prepared.stereo,44100,number,0); // original owner ROM accepts device ID 0
+        // True original UART clock, with 42 MIDI ticks between packets.
+        // This removes the 100ms MAME raw-SysEx parser gap and prevents
+        // overflowing its fixed 131072-byte transmitter queue for long WAVs.
+        const auto midi=akai::sds::toTimedMidiFile(dump);
         const auto output=juce::File(instanceTempDir).getChildFile("sds")
-            .getChildFile("owner-akai-sample-"+juce::String(int(number))+".syx");
+            .getChildFile("owner-akai-sample-"+juce::String(int(number))+".mid");
         if(output.getParentDirectory().createDirectory().failed() ||
-           !output.replaceWithData(dump.sysex.data(),dump.sysex.size())) {
+           !output.replaceWithData(midi.data(),midi.size())) {
             error="Could not stage the original Akai MIDI Sample Dump.";
             return false;
         }
@@ -331,7 +335,7 @@ bool EnsoniqSD1AudioProcessor::stageWavForOriginalSds(
                 return false;
             }
             originalSdsPendingPath=output.getFullPathName().toStdString();
-            originalSdsPendingDurationMs=dump.transportMillis;
+            originalSdsPendingDurationMs=akai::sds::timedMidiTransferMillis(dump);
             originalSdsLastWavName=file.getFileName();
             originalSdsStage.store(1,std::memory_order_release);
             originalSdsRequested.store(true,std::memory_order_release);
