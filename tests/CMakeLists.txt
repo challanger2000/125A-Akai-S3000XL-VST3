@@ -41,3 +41,8 @@ add_test(NAME akai_original_sds_keygroup_contract COMMAND akai_sds_assignment_te
 add_executable(akai_sds_boot_gate_tests AkaiSdsBootGateTests.cpp)
 target_compile_features(akai_sds_boot_gate_tests PRIVATE cxx_std_20)
 add_test(NAME akai_original_sds_boot_gate_contract COMMAND akai_sds_boot_gate_tests)
+
+# P036: fail-closed DAW host-state policy during firmware MIDI SDS / keygroup work
+add_executable(akai_sds_project_recall_guard_tests AkaiSdsStateGuardTests.cpp)
+target_compile_features(akai_sds_project_recall_guard_tests PRIVATE cxx_std_20)
+add_test(NAME akai_sds_project_recall_guard_contract COMMAND akai_sds_project_recall_guard_tests)
