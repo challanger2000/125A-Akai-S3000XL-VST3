@@ -72,7 +72,7 @@ def check(editor_cpp: str, editor_h: str, processor_cpp: str,
     # P047: a stray // may comment out the C++ function definition while
     # leaving its name in the source. Require a live line-start declaration.
     if not re.search(
-        r"(?m)^[ \\t]*int\\s+EnsoniqSD1AudioProcessor::pullAudioForMame\\s*\\(",
+        r"(?m)^[ \t]*int\s+EnsoniqSD1AudioProcessor::pullAudioForMame\s*\(",
         processor_cpp,
     ):
         raise AssertionError("Native Akai audio pull definition is absent/commented")
