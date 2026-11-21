@@ -15,6 +15,20 @@ int main(){
     ck(contains("Record Set-Up","RECORD SET-UP"),"case_insensitive");
     ck(!contains("RECORD","RECORD SET-UP"),"whole_required");
     ck(overwriteWarning("overwrite existing sample!?"),"overwrite");
+    ck(!overwriteWarning("RECORD SET-UP sample name: PULSE exists!"),
+       "real_firmware_existing_factory_waveform_setup_is_safe_to_rename");
+    ck(!overwriteWarning("RECORD MONO exists! PULSE"),
+       "existing_sample_name_is_not_overwrite_confirmation");
+    ck(overwriteWarning("RECORD MONO REPLACE EXISTING?"),
+       "true_destructive_confirmation_still_blocked");
+    ck(displayedRecordCentis("RECORD SET-UP record tim: 2.00s")==200,
+       "real_rom_2_seconds_record_time");
+    ck(displayedRecordCentis("RECORD SET-UP record tim: 123.45s")==12345,
+       "real_rom_123_45_seconds_record_time");
+    ck(displayedRecordCentis("RECORD MONO rec time: 2.00s")==0,
+       "no_fabricated_time_from_other_screen");
+    ck(displayedRecordCentis("RECORD SET-UP record tim: nonsense")==0,
+       "reject_invalid_firmware_duration");
     ck(hasUniqueRecordName("RECORD MONO * new * STRING C5 73%F"),"real_manual_star_new");
     ck(hasUniqueRecordName("RECORD MONO - new - STRING C5 73%F"),"legacy_dash_new");
     ck(!hasUniqueRecordName("SAMPLE EDIT * new * STRING C5"),"not_outside_record");
@@ -98,6 +112,72 @@ int main(){
        isRunningStage(Stage::WaitBootReady),
        "wav_replacement_locked_during_boot_skip");
     }
+    // Physical original-key navigation proven on owner's running V2.0:
+    // initial sample-name selection -> 4x DOWN -> RIGHT -> digits 2,2,5,
+    // then only when LCD echoes 2.25s may firmware REC be pressed.
+    Controller timeCfg;
+    ck(!timeCfg.start(0,100000),"reject_unrepresentable_native_time");
+    ck(timeCfg.start(0,225),"original_record_length_start");
+    constexpr auto setup="RECORD SET-UP sample name: PULSE exists! record tim: 1.00s";
+    auto action=timeCfg.step(at(setup),0);
+    ck(action.stage==Stage::PressTimeDown && action.command==Command::Press
+       && action.button==Button::CursorDown,"navigate_down_one");
+    for(unsigned i=0;i<4;++i){
+        const auto released=121+250*i;
+        action=timeCfg.step(at(setup),released);
+        ck(action.command==Command::Release
+           && action.button==Button::CursorDown,"time_down_release");
+        if(i<3){
+            action=timeCfg.step(at(setup),released+20);
+            ck(action.command==Command::Press
+               && action.button==Button::CursorDown,
+               "time_next_down_press");
+        }
+    }
+    ck(action.stage==Stage::PressTimeRight,"four_down_reaches_time_row");
+    action=timeCfg.step(at(setup),1000);
+    ck(action.command==Command::Press &&
+       action.button==Button::CursorRight,"time_right_into_column");
+    action=timeCfg.step(at(setup),1121);
+    ck(action.command==Command::Release && action.stage==Stage::TypeTime,
+       "time_right_release");
+    const Button digits[]={Button::Digit2,Button::Digit2,Button::Digit5};
+    for(unsigned i=0;i<3;++i){
+        const auto ms=1200+230*i;
+        action=timeCfg.step(at(setup),ms);
+        ck(action.command==Command::Press&&action.button==digits[i],
+           "record_time_integer_digits");
+        action=timeCfg.step(at(setup),ms+121);
+        ck(action.command==Command::Release,"record_time_digit_release");
+    }
+    ck(action.stage==Stage::VerifyTime,"original_firmware_time_echo_required");
+    action=timeCfg.step(at(setup),2000);
+    ck(action.command==Command::None && action.stage==Stage::VerifyTime,
+       "cannot_rec_on_stale_duration");
+    action=timeCfg.step(at("RECORD SET-UP sample name: PULSE exists! record tim: 2.25s"),2100);
+    ck(action.command==Command::Press&&action.button==Button::RecF2,
+       "native_record_time_exact_echo_allows_rec");
+    Controller wrongField;ck(wrongField.start(0,125),"mismatch_start");
+    wrongField.step(at(setup),0);
+    wrongField.step(at(setup),121);
+    wrongField.step(at(setup),141);
+    wrongField.step(at(setup),262);
+    wrongField.step(at(setup),282);
+    wrongField.step(at(setup),403);
+    wrongField.step(at(setup),423);
+    wrongField.step(at(setup),544);
+    wrongField.step(at(setup),560);
+    wrongField.step(at(setup),681);
+    for(unsigned i=0;i<3;++i){
+        wrongField.step(at(setup),800+200*i);
+        wrongField.step(at(setup),921+200*i);
+    }
+    ck(wrongField.stage()==Stage::VerifyTime,"wrong_field_waits_for_echo");
+    action=wrongField.step(at("RECORD SET-UP sample name: PULSE exists! record tim: 1.00s"),2000);
+    ck(action.command==Command::None,"wrong_time_must_not_start_recording");
+    action=wrongField.step(at(setup),9500);
+    ck(action.stage==Stage::TimedOut && !wrongField.isRunning(),
+       "wrong_time_failed_closed");
     Controller c;
     ck(c.start(0),"begin");
     auto r=c.step(at("RECORD SET-UP"),0);

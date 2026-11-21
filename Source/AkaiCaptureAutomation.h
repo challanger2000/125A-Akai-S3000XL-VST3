@@ -11,7 +11,8 @@
 namespace akai::capture {
 enum class Button: unsigned char {
     None, Sample, RecF2, ArmF8, GoF7, Name, Enter,
-    Digit0, Digit1, Digit2, Digit3, Digit4, Digit5, Digit6, Digit7, Digit8, Digit9
+    Digit0, Digit1, Digit2, Digit3, Digit4, Digit5, Digit6, Digit7, Digit8, Digit9,
+    CursorDown, CursorRight
 };
 enum class Command: unsigned char { None, Press, Release };
 enum class Stage: int {
@@ -22,6 +23,7 @@ enum class Stage: int {
     PressName=13, PressNumericMode=14, TypeName=15,
     ConfirmName=16, WaitNamed=17,
     PressBootSkip=18, WaitBootReady=19,
+    PressTimeDown=30, PressTimeRight=31, TypeTime=32, VerifyTime=33,
     NeedNewSample=20, NoReadableLcd=21, OverwriteRisk=22,
     TimedOut=23, Busy=24, Cancelled=25,
     SourceUnavailable=26, SampleTruncated=27
@@ -84,14 +86,40 @@ inline bool isOriginalStartupScreen(std::string_view lcd) noexcept {
         || contains(lcd,"OPERATING SYSTEM")
         || (contains(lcd,"PROGRAMS IN MEMORY") && !contains(lcd,"SLCT"));
 }
+// Native V2.0 SET-UP and REC pages show "exists!" when PULSE is a
+// pre-existing factory sample. That is NOT a destructive overwrite prompt;
+// no ARM or GO is allowed until the LCD later says "- new -".
 inline bool overwriteWarning(std::string_view text) noexcept {
-    return contains(text,"OVERWRITE") || contains(text,"EXISTS!")
-        || contains(text,"REPLACE EXISTING") || contains(text,"DELETE");
+    return contains(text,"OVERWRITE") || contains(text,"REPLACE EXISTING")
+        || contains(text,"DELETE");
+}
+// Parse only the actual original Akai SET-UP field. Example measured on
+// owner V2.0 ROM: "record tim: 2.00s", "record tim:123.45s".
+// Zero means missing/malformed, never a safe duration verification.
+inline std::uint32_t displayedRecordCentis(std::string_view lcd) noexcept {
+    constexpr std::string_view field="RECORD TIM:";
+    for(std::size_t i=0;i+field.size()<=lcd.size();++i){
+        if(!contains(lcd.substr(i,field.size()),field))continue;
+        std::size_t p=i+field.size();
+        while(p<lcd.size() && lcd[p]==' ')++p;
+        std::uint32_t seconds=0;unsigned digits=0;
+        while(p<lcd.size() && lcd[p]>='0' && lcd[p]<='9' && digits<3){
+            seconds=seconds*10u+std::uint32_t(lcd[p]-'0');++digits;++p;
+        }
+        if(!digits || p>=lcd.size() || lcd[p++]!='.' || p+2>=lcd.size())
+            return 0;
+        if(lcd[p]<'0'||lcd[p]>'9'||lcd[p+1]<'0'||lcd[p+1]>'9'
+           || (lcd[p+2]!='s' && lcd[p+2]!='S'))return 0;
+        return seconds*100u+10u*std::uint32_t(lcd[p]-'0')
+                   +std::uint32_t(lcd[p+1]-'0');
+    }
+    return 0;
 }
 constexpr bool isRunningStage(Stage s) noexcept {
     return (s>=Stage::WaitWav && s<=Stage::WaitStop)
         || (s>=Stage::PressName && s<=Stage::WaitNamed)
-        || s==Stage::PressBootSkip || s==Stage::WaitBootReady;
+        || s==Stage::PressBootSkip || s==Stage::WaitBootReady
+        || (s>=Stage::PressTimeDown && s<=Stage::VerifyTime);
 }
 constexpr Button numericButton(char digit) noexcept {
     switch(digit){
@@ -105,13 +133,18 @@ constexpr Button numericButton(char digit) noexcept {
 }
 class Controller {
 public:
-    bool start(std::uint64_t ms) noexcept {
-        if (isRunning()) return false;
+    bool start(std::uint64_t ms, std::uint32_t requestedRecordCentis=0) noexcept {
+        if (isRunning() || requestedRecordCentis>99999u) return false;
         if(nextName_>=999999999u)return false; // never re-use a known generated name
         nameSequence_=++nextName_;
         nameIndex_=0;
         nameRetries_=0;
         bootSkipAttempts_=0;
+        recordCentis_=requestedRecordCentis;
+        timeDownCount_=0;
+        timeDigitIndex_=0;
+        timeDigitCount_=1;
+        for(auto n=recordCentis_;n>=10;n/=10)++timeDigitCount_;
         stage_=Stage::WaitWav; enteredMs_=ms; held_=Button::None;
         return true;
     }
@@ -146,7 +179,8 @@ public:
              stage_==Stage::PressRec || stage_==Stage::WaitNewSample ||
              stage_==Stage::PressArm || stage_==Stage::WaitArmed ||
              (stage_>=Stage::PressName && stage_<=Stage::WaitNamed) ||
-             stage_==Stage::PressBootSkip || stage_==Stage::WaitBootReady) &&
+             stage_==Stage::PressBootSkip || stage_==Stage::WaitBootReady ||
+             (stage_>=Stage::PressTimeDown && stage_<=Stage::VerifyTime)) &&
              !o.wavReady)
             return finish(Stage::SourceUnavailable);
         if(ms>=enteredMs_ && ms-enteredMs_>timeoutForStage())
@@ -167,6 +201,14 @@ public:
                 case Stage::PressArm: transition(Stage::WaitArmed,ms);break;
                 case Stage::PressGo: transition(Stage::WaitRecording,ms);break;
                 case Stage::PressBootSkip: transition(Stage::WaitBootReady,ms);break;
+                case Stage::PressTimeDown:
+                    if(++timeDownCount_>=4)transition(Stage::PressTimeRight,ms);
+                    break;
+                case Stage::PressTimeRight: transition(Stage::TypeTime,ms);break;
+                case Stage::TypeTime:
+                    if(++timeDigitIndex_>=timeDigitCount_)
+                        transition(Stage::VerifyTime,ms);
+                    break;
                 case Stage::PressName: transition(Stage::PressNumericMode,ms);break;
                 case Stage::PressNumericMode: transition(Stage::TypeName,ms);break;
                 case Stage::TypeName:
@@ -195,8 +237,7 @@ public:
                     if(isOriginalStartupScreen(o.lcd)) break;
                     // If already on record setup, don't press SAMPLE again.
                     if(contains(o.lcd,"RECORD SET-UP")) {
-                        transition(Stage::PressRec,ms);
-                        return press(Button::RecF2,ms);
+                        return beginRecordSetup(o,ms);
                     }
                     transition(Stage::PressSample,ms);
                     return press(Button::Sample,ms);
@@ -216,7 +257,30 @@ public:
                 }
                 break;
             case Stage::WaitSetup:
-                if(o.readable && contains(o.lcd,"RECORD SET-UP")) {
+                if(o.readable && contains(o.lcd,"RECORD SET-UP"))
+                    return beginRecordSetup(o,ms);
+                break;
+            case Stage::PressTimeDown:
+                if(o.readable && contains(o.lcd,"RECORD SET-UP")
+                   && contains(o.lcd,"RECORD TIM:"))
+                    return press(Button::CursorDown,ms);
+                break;
+            case Stage::PressTimeRight:
+                if(o.readable && contains(o.lcd,"RECORD SET-UP")
+                   && contains(o.lcd,"RECORD TIM:"))
+                    return press(Button::CursorRight,ms);
+                break;
+            case Stage::TypeTime:
+                if(o.readable && contains(o.lcd,"RECORD SET-UP")
+                   && contains(o.lcd,"RECORD TIM:"))
+                    return press(numericButton(recordDigit(timeDigitIndex_)),ms);
+                break;
+            case Stage::VerifyTime:
+                // Native firmware itself must echo the requested value.
+                // No REC/ARM/GO if a cursor moved incorrectly or any digit
+                // failed to register.
+                if(o.readable && contains(o.lcd,"RECORD SET-UP")
+                   && displayedRecordCentis(o.lcd)==recordCentis_) {
                     transition(Stage::PressRec,ms);
                     return press(Button::RecF2,ms);
                 }
@@ -302,6 +366,27 @@ private:
     std::uint32_t nextName_=0;
     std::uint32_t nameSequence_=0;
     unsigned nameIndex_=0, nameRetries_=0, bootSkipAttempts_=0;
+    std::uint32_t recordCentis_=0;
+    unsigned timeDownCount_=0, timeDigitIndex_=0, timeDigitCount_=1;
+    char recordDigit(unsigned index)const noexcept{
+        std::uint32_t divisor=1;
+        for(unsigned n=index+1;n<timeDigitCount_;++n)divisor*=10u;
+        return char('0'+(recordCentis_/divisor)%10u);
+    }
+    Decision beginRecordSetup(const Observe& o,std::uint64_t ms) noexcept {
+        if(recordCentis_!=0) {
+            if(!contains(o.lcd,"RECORD TIM:") ||
+               !contains(o.lcd,"SAMPLE NAME:"))
+                return {Command::None,Button::None,stage_};
+            if(displayedRecordCentis(o.lcd)!=recordCentis_){
+                timeDownCount_=0;timeDigitIndex_=0;
+                transition(Stage::PressTimeDown,ms);
+                return press(Button::CursorDown,ms);
+            }
+        }
+        transition(Stage::PressRec,ms);
+        return press(Button::RecF2,ms);
+    }
     // Exactly 12 digits: prefix "125" + nine-digit serial (1..999999999).
     // The Akai naming dialog is limited to 12 characters. Fully overwrite
     // all positions, including any existing waveform name suffix.
