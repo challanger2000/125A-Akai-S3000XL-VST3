@@ -1362,6 +1362,7 @@ void EnsoniqSD1AudioProcessorEditor::mouseDown(const juce::MouseEvent& e) {
             if (auto* parameter = audioProcessor.apvts.getParameter("data_entry")) {
                 parameter->beginChangeGesture();
                 if (e.mods.isCtrlDown()) {
+                    audioProcessor.dialValue.store(0,std::memory_order_release);
                     parameter->setValueNotifyingHost(parameter->getDefaultValue());
                     parameter->endChangeGesture();
                     dialDragActive = false;
@@ -1369,6 +1370,7 @@ void EnsoniqSD1AudioProcessorEditor::mouseDown(const juce::MouseEvent& e) {
                     const int step = mpcIdx == 37 ? 1 : -1;
                     const int dv = (audioProcessor.dialValue.load(
                         std::memory_order_acquire) + step) & 0xff;
+                    audioProcessor.dialValue.store(dv,std::memory_order_release);
                     parameter->setValueNotifyingHost(float(dv) / 255.0f);
                     dialDragActive = true;
                     dialDragLastY = e.y;
@@ -1458,8 +1460,10 @@ void EnsoniqSD1AudioProcessorEditor::mouseDrag(const juce::MouseEvent& e) {
         if (steps != 0) {
             const int dv = (audioProcessor.dialValue.load(
                 std::memory_order_acquire) + steps) & 0xff;
-            if (auto* parameter = audioProcessor.apvts.getParameter("data_entry"))
+            if (auto* parameter = audioProcessor.apvts.getParameter("data_entry")) {
+                audioProcessor.dialValue.store(dv,std::memory_order_release);
                 parameter->setValueNotifyingHost(float(dv) / 255.0f);
+            }
             dialDragLastY = e.y;
         }
         return;
