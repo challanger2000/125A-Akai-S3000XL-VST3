@@ -41,3 +41,18 @@ This test does **not** prove whether the actual fault lies in original SDS recep
 5. Preserve deliberate test-only mutants that substitute a factory waveform or suppress the source transfer: the audio/content oracle must reject them. Do not relax the requirement to “nonzero and deterministic”.
 
 Until that evidence passes, this native original-ROM counterexample is **NO-GO**, regardless of ROM-free Windows compiler/Steinberg/125A-Tester results. Never place the owner's ROMs or native snapshots in public CI.
+
+
+## Follow-up controls: SDS image detached before save; MIDI Program Changes 0–5
+
+To challenge the possibility that the earlier saved `.sta` only sounded like the factory sample because it retained an actively mounted SDS MIDI image, the two original transfers were repeated with the actual MAME MIDI input image **explicitly unloaded after the 60-tick packet transport completed and before original Akai panel assignment and MAME save**. Both genuine LCD snapshots still showed `TEST PROGRAM` / keygroup 1 / `MIDI 99` / velocity 0–127 without a missing-sample marker. The source WAVs and .mid import files remained unavailable on fresh replay.
+
+- Fresh A-original-ROM state with MIDI input image unloaded: 384,961 frames, 48 kHz, 11-channel PCM16; main left/right indices 1/2 each had **33,819** nonzero samples, peak **4,699**; raw PCM SHA-256 `44d639a39a8c664858ffe079f4eabd653d30766d95f80bbe452e3ec0a547f074`.
+- Fresh all-zero B-original-ROM state with MIDI input image unloaded: **exactly the same** frames, amplitudes, counts and entire raw PCM SHA-256. Full PCM byte comparison: **zero differences**.
+- A further genuinely scheduled original UART MIDI sequence sent **Program Change 0, 1, 2, 3, 4, 5**, each followed by a NoteOn/NoteOff (C3, velocity 110). With the detached-SDS states, A/B emitted **byte-identical 384,961-frame original PCM**, SHA-256 `21ad0ba3d10791bbd87cb7f31d7e766eb091de883fdac5bc1acde7d4d0463cbf`, with main L/R each 21,727 nonzero samples (peak 4,507). This does not exclude that another MIDI program/bank or front-panel mode is needed, but rules out an ordinary ProgramChange 0–5 as sufficient in this fixture.
+
+**Conclusion strengthened:** The A/B source-content counterexample survives deliberate MIDI-image detachment before native state save, separate fresh-device restores, an original-panel EDIT→SINGLE transition and a six-program-change probe. **Actual import-to-note causality is still unproven.** Do not ascribe a specific faulty subsystem without a traced DSP/Sample-RAM/program route; do not delete or weaken the counterexample merely because the LCD shows `MIDI 99`.
+
+## Exact Windows baseline verified independently, but not a source-content oracle
+
+Full **ROM-free** Windows x64 MAME 0.288 + JUCE 8.0.12 VST3 build at exact production source commit `894338ba38a363b6903278b51bac52fd9fb45c87` passed [Windows Actions #44941367658](https://github.com/challanger2000/125A-Akai-S3000XL-VST3/actions/runs/44941367658). Installed QA reports show official Steinberg **47 tests passed / 0 failed** and pinned 125A Tester v0.3.2 **55 PASS / 0 WARNING / 0 FAIL**, including its ROM-free host lifecycle and state probes. ROM-free tests had **zero genuine original-ROM sound**; therefore neither test covers an SDS-imported WAV sound nor a fresh Windows owner-VST3 DAW save/reload. Proprietary original-ROM tests above ran only as separate private Linux MAME experiments from an earlier pinned ROM-free emulator binary, **not** the final Windows VST3.
