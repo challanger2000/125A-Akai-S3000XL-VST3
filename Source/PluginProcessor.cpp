@@ -883,6 +883,7 @@ private:
     akai::capture::Controller captureController; // MAME/OSD owner thread only
     int captureHeldIndex = -1; // only release buttons this controller pressed
     bool originalSdsTransferActive=false; // native MAME owner only
+    bool originalSdsSavedMidiSuppression=false; // restore prior DAW MIDI gate
     std::uint64_t originalSdsFinishAtMs=0;
     akai::sds::Assignment originalSdsAssignment;
     int originalSdsHeldIndex=-1;
@@ -1593,6 +1594,7 @@ public:
                     "mdin:midiin:midiinimg");
                 if(originalSdsTransferActive && now>=originalSdsFinishAtMs) {
                     originalSdsTransferActive=false;
+                    processor->clearMidiBuffer(); // discard stale host notes
                     // The actual input image's UART stream must be allowed to
                     // drain before restoring DAW live MIDI. This is not an
                     // assertion that original firmware assigned a program.
@@ -1602,8 +1604,16 @@ public:
                             restored.first ? 4:5,std::memory_order_release);
                         if(!restored.first)
                             (void)originalSdsAssignment.start(now);
-                    } else processor->originalSdsStage.store(
-                        4,std::memory_order_release);
+                        processor->suppressMidiInput.store(
+                            originalSdsSavedMidiSuppression,
+                            std::memory_order_release);
+                    } else {
+                        processor->originalSdsStage.store(
+                            4,std::memory_order_release);
+                        processor->suppressMidiInput.store(
+                            originalSdsSavedMidiSuppression,
+                            std::memory_order_release);
+                    }
                 }
                 if(!originalSdsTransferActive &&
                    processor->originalSdsRequested.load(std::memory_order_acquire) &&
@@ -1620,6 +1630,10 @@ public:
                             false,std::memory_order_release);
                     }
                     if(in && !staged.empty() && duration>0) {
+                        originalSdsSavedMidiSuppression=
+                            processor->suppressMidiInput.exchange(
+                                true,std::memory_order_acq_rel);
+                        processor->clearMidiBuffer();
                         const auto status=in->load(staged);
                         if(!status.first) {
                             originalSdsTransferActive=true;
@@ -1630,6 +1644,9 @@ public:
                             processor->originalSdsStage.store(
                                 4,std::memory_order_release);
                             (void)in->load("VST MIDI");
+                            processor->suppressMidiInput.store(
+                                originalSdsSavedMidiSuppression,
+                                std::memory_order_release);
                         }
                     } else processor->originalSdsStage.store(
                         4,std::memory_order_release);
