@@ -56,3 +56,8 @@ add_test(NAME akai_original_wav_to_sds_e2e_contract COMMAND akai_wav_to_sds_e2e_
 add_executable(akai_midi_port_fail_closed_tests AkaiMidiPortGuardTests.cpp)
 target_compile_features(akai_midi_port_fail_closed_tests PRIVATE cxx_std_20)
 add_test(NAME akai_midi_image_fail_closed_contract COMMAND akai_midi_port_fail_closed_tests)
+
+# P044: original MAME m_last_dial must match host's physical :DATAENTRY on recall
+add_executable(akai_dial_recall_tests AkaiDialRecallTests.cpp)
+target_compile_features(akai_dial_recall_tests PRIVATE cxx_std_20)
+add_test(NAME akai_native_dial_recall_contract COMMAND akai_dial_recall_tests)
