@@ -61,5 +61,24 @@ int main(){
  };
  CHECK(std::equal(ownerHeader.begin(),ownerHeader.end(),owner.sysex.begin()));
  CHECK(owner.packets()==20 && owner.sysex.size()==2561);
- std::cout<<"P030_ORIGINAL_AKAI_SDS_PACKET_CODEC_AND_WIRE_BOUNDS=PASS\n";
+ // P032: 42 ticks = 43.75ms at 480 PPQN 120BPM, safely above
+ // real 127-byte MIDI UART wire time 40.64ms. Native original owner Akai
+ // accepted timed-MIDI SDS, confirmed actual LCD + audible state reopen.
+ const auto midiFile=toTimedMidiFile(owner);
+ CHECK(midiFile.size()>owner.sysex.size());
+ constexpr std::array<std::uint8_t,14> midiHeader={
+  'M','T','h','d',0,0,0,6,0,0,0,1,1,0xe0};
+ CHECK(std::equal(midiHeader.begin(),midiHeader.end(),midiFile.begin()));
+ CHECK(midiFile[14]=='M' && midiFile[15]=='T' && midiFile[16]=='r'
+       && midiFile[17]=='k');
+ CHECK(midiFile[22]==0 && midiFile[23]==0xff && midiFile[24]==0x51);
+ CHECK(midiFile[29]==0 && midiFile[30]==0xf0 && midiFile[31]==20);
+ CHECK(midiFile[52]==42 && midiFile[53]==0xf0 && midiFile[54]==126);
+ CHECK(midiFile.back()==0 && midiFile[midiFile.size()-4]==0);
+ CHECK(midiFile[midiFile.size()-3]==0xff);
+ CHECK(midiFile[midiFile.size()-2]==0x2f);
+ CHECK(timedMidiTransferMillis(owner)>2000 && timedMidiTransferMillis(owner)<3000);
+ Dump broken=owner;broken.sysex.pop_back();
+ CHECK(bad([&]{toTimedMidiFile(broken);}));
+ std::cout<<"P030_P032_AKAI_SDS_PACKET_AND_FAST_TIMED_MIDI_WIRE=PASS\n";
 }
