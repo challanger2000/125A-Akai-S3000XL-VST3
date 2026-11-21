@@ -289,7 +289,7 @@ int main(){
     r=c.step(at(missingZone),4650);
     ck(r.command==Command::None && r.stage==Stage::WaitAssigned,
        "never_accept_nonexistent_waveform_as_midi_playable");
-    r=c.step(at(valid),4800);
+    r=c.step(at(validZone),4800);
     ck(r.stage==Stage::RecordedSample && !c.isRunning(),
        "original_firmware_confirmed_keygroup_final_success");
     ck(!isRunningStage(Stage::RecordedSample),"final_state_is_not_running");
