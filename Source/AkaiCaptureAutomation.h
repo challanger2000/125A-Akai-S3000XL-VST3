@@ -177,6 +177,13 @@ inline bool originalZoneOneAssigned(std::string_view lcd,
     }
     return false;
 }
+// The original sampler is constrained by the actual configured REC TIME,
+// not an arbitrary 120-second application timer. Bound from firmware value,
+// with 20s scheduler margin and a 120s floor for legacy manual operation.
+inline constexpr std::uint64_t nativeCaptureTimeoutMs(std::uint32_t recordCentis) noexcept {
+    const auto byFirmware=std::uint64_t(recordCentis)*10u+20000u;
+    return byFirmware>120000u?byFirmware:120000u;
+}
 constexpr bool isRunningStage(Stage s) noexcept {
     return (s>=Stage::WaitWav && s<=Stage::WaitStop)
         || (s>=Stage::PressName && s<=Stage::WaitNamed)
@@ -532,8 +539,10 @@ private:
         stage_=next;enteredMs_=ms;
     }
     std::uint64_t timeoutForStage()const noexcept{
-        if(stage_==Stage::WaitStop)return 120000; // firmware's duration controls stop
-        if(stage_==Stage::Capturing)return 120000;
+        // After the WAV is completely fed, firmware must confirm its own
+        // STOP promptly; 30 seconds is an upper bound, not arbitrary success.
+        if(stage_==Stage::WaitStop)return 30000;
+        if(stage_==Stage::Capturing)return nativeCaptureTimeoutMs(recordCentis_);
         if(stage_==Stage::WaitWav)return 30000;
         if(stage_==Stage::WaitBootReady)return 12000;
         return 8000;

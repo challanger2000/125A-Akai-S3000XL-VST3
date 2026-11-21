@@ -1,0 +1,21 @@
+# P027 — Owner-original Akai PCM audio, cross-process keygroup recall, and length-accurate firmware capture window
+
+## Authentic original-ROM audio output, independently controlled
+Private owner-supplied Akai S3000XL V2.0 BIOS plus HD61830 display ROM were loaded into the ROM-free Linux patched ORIGINAL MAME 0.288, same core used by the Windows VST3 build. A standalone Linux MAME execution loaded an authentic firmware-ready `.sta` previously produced from the same original Akai ROMs. The **same starting original-ROM state** was run twice, 34 seconds of native emulator time:
+
+- **Negative control:** do not press any playback controls. Original MAME `-wavwrite` recording: 48,000 Hz, 11 output channels, 384,001 PCM16 frames, precisely **zero nonzero samples** across every channel.
+- **Positive control:** the original panel SINGLE (mode select) and ENTER/PLAY pressed and released twice, at emulated 29.0s and 30.0s. `-wavwrite` produces nonzero PCM on output channels **1 and 2**, and is silent before and after: peak **7,142 PCM16**, full-capture RMS **793.16** (across all channels), notable 0.5-second-window RMS **2066.16** at 3.0s and **1933.09** at 4.0s after restoring the state. The emulator snapshot at 31s shows genuine `PROGRAMS IN MEMORY`, `1 TEST PROGRAM` and active original front-panel keys.
+- The standalone MAME sound system reports 11 channels (two main outputs plus individual outputs), not merely an invented stereo oscillator. This verifies **audible original-MAME voice output** and actual hardware-key-triggered playback, but NOT a specific imported WAV, Windows VST3 MIDI input or matched DAW audio.
+
+## Cross-process firmware state and actual program assignment
+The independently generated native original-MAME `owner-recorded-keygroup-original.sta` was produced after the owner-ROM firmware SAMPLE→REC→NAME `125000000001`→ARM→GO→SINGLE→EDIT→F2 Keygroups→F6 Sample→NAME assignment sequence. File length: **314,675 bytes**, written by the original save machinery, capturing the RAM and original complete machine state. Load that file in a completely fresh MAME process running the same original owner ROMs and take a fresh original framebuffer snapshot. The genuine `KG:1 ED:ONE TEST PROGRAM` sample page shows **zone 1 `125000000001`, velocity 0–127 without '?'**. Empty unused zones 2–4 still show their normal missing-sample '?' indicators. This proves cross-process original CPU+RAM+program/keygroup recall, not just synthetic RAM marker checks. Original standalone microphone is silent, so the recorded content itself is silent. This does NOT meet the requested DAW-project WAV recall or audible input requirement.
+
+## Timing defect fixed
+P025 correctly configures the native original `RECORD TIM:` duration from prepared WAV frame count plus 0.25s buffer. However, the pre-existing capture-controller watchdog incorrectly forced **120,000ms** in `Capturing` irrespective of Akai firmware REC TIME. A WAV longer than 120s could therefore be incorrectly aborted even when its genuine native recording was healthy.
+- New bounded `nativeCaptureTimeoutMs(recordCentis)` is `max(120000, centis*10+20000)`.
+- Once the WAV feed reports complete, `WaitStop` requires the original firmware to confirm its STOP within 30 seconds. It must still observe WADCS native stop; elapsed time never fakes completion.
+- Regression exercises actual synthetic original-WADCS state transitions for a 150-second configured recording, verifying no false timeout at 121s, plus eventual finite expiry after 170s. Negative tests include boundary 999.99s.
+- No DSP, factory SINE, ADC microcode, original firmware, or sample-memory direct writes have changed.
+
+## FINAL remains blocked
+The known exact ROM-free Windows VST3 P026 build and 125A Tester/Steinberg validation is tracked separately. We **still have not exercised any nonzero imported WAV through the original Akai ADC→DMA→sample RAM**, nor proven MIDI note sound of that recording in the Windows plugin or exact project save/reopen after deleting the original WAV. Neither audible factory sound nor a valid stored sample name is a substitute. No final distribution should be labeled complete until those are proven with genuine owner-ROM and appropriate host.

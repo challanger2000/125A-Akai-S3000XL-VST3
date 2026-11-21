@@ -30,6 +30,12 @@ int main(){
        "no_fabricated_time_from_other_screen");
     ck(displayedRecordCentis("RECORD SET-UP record tim: nonsense")==0,
        "reject_invalid_firmware_duration");
+    ck(nativeCaptureTimeoutMs(0)==120000,
+       "default_manual_capture_old_120_second_guard");
+    ck(nativeCaptureTimeoutMs(15000)==170000,
+       "real_two_and_half_minute_wav_not_truncated_by_fixed_120s_controller");
+    ck(nativeCaptureTimeoutMs(99999)==1019990,
+       "firmware_maximum_duration_always_finite");
     ck(hasUniqueRecordName("RECORD MONO * new * STRING C5 73%F"),"real_manual_star_new");
     ck(hasUniqueRecordName("RECORD MONO - new - STRING C5 73%F"),"legacy_dash_new");
     ck(!hasUniqueRecordName("SAMPLE EDIT * new * STRING C5"),"not_outside_record");
@@ -179,6 +185,29 @@ int main(){
     action=wrongField.step(at(setup),9500);
     ck(action.stage==Stage::TimedOut && !wrongField.isRunning(),
        "wrong_time_failed_closed");
+    // A >120 s original firmware recording must remain armed past the
+    // legacy 120 s synthetic watchdog. Its STOP still needs positive Akai
+    // WADCS and native LCD feedback.
+    Controller longRecording;
+    ck(longRecording.start(0,15000),"long_recording_controller_start");
+    auto longResult=longRecording.step(
+        at("RECORD SET-UP sample name: PULSE record tim: 150.00s"),0);
+    ck(longResult.button==Button::RecF2 &&
+       longResult.stage==Stage::PressRec,"long_recording_skip_time_reentry");
+    longRecording.step(at("RECORD SET-UP"),121);
+    longRecording.step(at("RECORD MONO * new * 125000000001"),200);
+    longRecording.step(at("RECORD MONO * new * 125000000001"),330);
+    longRecording.step(at("WAITING FOR START",true,0x82),500);
+    longRecording.step(at("WAITING FOR START",true,0x82),621);
+    longResult=longRecording.step(at("RECORDING original",true,0x8a),750);
+    ck(longResult.stage==Stage::Capturing,
+       "long_sample_original_adc_dma_strobe");
+    longResult=longRecording.step(at("RECORDING original",true,0x8a),121000);
+    ck(longResult.stage==Stage::Capturing && longRecording.isRunning(),
+       "long_recording_no_false_timeout_at_121_seconds");
+    longResult=longRecording.step(at("RECORDING original",true,0x8a),171000);
+    ck(longResult.stage==Stage::TimedOut && !longRecording.isRunning(),
+       "long_recording_eventual_finite_timeout");
     Controller c;
     ck(c.start(0),"begin");
     auto r=c.step(at("RECORD SET-UP"),0);
