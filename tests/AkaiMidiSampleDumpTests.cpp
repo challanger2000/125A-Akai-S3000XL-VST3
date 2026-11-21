@@ -86,7 +86,7 @@ int main(){
  auto readVlq=[&]()->std::uint32_t {
   std::uint32_t v=0;
   for(int k=0;k<5;++k) {
-   CK(cursor<grouped.size()); // independent malformed MIDI guard
+   CHECK(cursor<grouped.size()); // independent malformed MIDI guard
    const auto b=grouped[cursor++];
    v=(v<<7)|(b&127u);
    if(!(b&128u))return v;
