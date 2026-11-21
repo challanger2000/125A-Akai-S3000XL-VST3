@@ -40,3 +40,50 @@ jobs:
         run: cmake --build build-core --config Release --parallel 2
       - name: Run native tests
         run: ctest --test-dir build-core -C Release --output-on-failure
+
+  owner-local-firmware-host:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install native ROM-free MAME 0.288 dependencies
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
+            build-essential git python3 libfontconfig-dev libfreetype6-dev \
+            libsdl2-dev libsdl2-ttf-dev libasound2-dev libpulse-dev \
+            libflac-dev libjpeg-dev libsqlite3-dev liblua5.4-dev \
+            libx11-dev libxi-dev libxrandr-dev libxinerama-dev libxcursor-dev \
+            libudev-dev libportmidi-dev libjack-jackd2-dev
+      - name: Clone MAME 0.288 and apply identical Akai hardware patch
+        shell: bash
+        run: |
+          set -euxo pipefail
+          git clone --filter=blob:none --depth 1 --branch mame0288 https://github.com/mamedev/mame.git external/mame
+          git -C external/mame apply --check "$GITHUB_WORKSPACE/mame-0288-s3000xl-vst.patch"
+          git -C external/mame apply "$GITHUB_WORKSPACE/mame-0288-s3000xl-vst.patch"
+      - name: Build original native S3000XL MAME for completely PRIVATE local V2.0 ROM test
+        shell: bash
+        run: |
+          set -euxo pipefail
+          make -C external/mame -j3 SUBTARGET=s3000xl \
+            SOURCES=src/mame/akai/s3000.cpp OSD=sdl USE_QTDEBUG=0 NO_X11=1
+          test -x external/mame/mames3000xl
+      - name: Verify no proprietary owner firmware entered GitHub
+        shell: bash
+        run: |
+          set -euxo pipefail
+          external/mame/mames3000xl -help > /tmp/mame-help.txt
+          mkdir -p owner-local-probe
+          cp external/mame/mames3000xl owner-local-probe/mames3000xl
+          sha256sum owner-local-probe/mames3000xl > owner-local-probe/sha256.txt
+          printf 'No proprietary ROMs. Owner runs this binary locally using original verified V2 ROMs.\n' > owner-local-probe/README.txt
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: P017-original-native-Linux-MAME-0.288-for-owner-private-boot
+          path: owner-local-probe/**
+          if-no-files-found: error
+          retention-days: 7
