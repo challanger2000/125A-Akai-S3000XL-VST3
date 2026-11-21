@@ -20,6 +20,34 @@ int main(){
     ck(!hasUniqueRecordName("SAMPLE EDIT * new * STRING C5"),"not_outside_record");
     ck(!hasUniqueRecordName("RECORD MONO STRING C5"),"not_existing_name");
     ck(!overwriteWarning("record time: 01:22"),"ordinary_record");
+    // Cold-boot WAV import is queued until the ORIGINAL firmware is ready.
+    // The previous unconditional !firmwareReady guard immediately discarded it.
+    Controller booting;
+    ck(booting.start(0),"cold_boot_import_start");
+    Observe cold=at("RECORD SET-UP"); cold.firmwareReady=false;
+    auto bootDecision=booting.step(cold,0);
+    ck(bootDecision.command==Command::None &&
+       bootDecision.stage==Stage::WaitWav,"cold_boot_no_early_abort");
+    bootDecision=booting.step(cold,1000);
+    ck(bootDecision.command==Command::None &&
+       bootDecision.stage==Stage::WaitWav,"cold_boot_no_blind_panel_key");
+    bootDecision=booting.step(at("RECORD SET-UP"),1100);
+    ck(bootDecision.command==Command::Press &&
+       bootDecision.button==Button::RecF2,"cold_boot_resumes_real_rec");
+    Controller neverReady;
+    ck(neverReady.start(0),"cold_boot_timeout_start");
+    neverReady.step(cold,0);
+    bootDecision=neverReady.step(cold,30001);
+    ck(bootDecision.command==Command::None &&
+       bootDecision.stage==Stage::TimedOut,"cold_boot_finite_timeout");
+    Controller interrupted;
+    ck(interrupted.start(0),"firmware_loss_start");
+    interrupted.step(at("RECORD SET-UP"),0);
+    bootDecision=interrupted.step(cold,50);
+    ck(bootDecision.stage==Stage::TimedOut &&
+       bootDecision.command==Command::Release &&
+       bootDecision.button==Button::RecF2,
+       "firmware_loss_releases_owned_key");
     Controller c;
     ck(c.start(0),"begin");
     auto r=c.step(at("RECORD SET-UP"),0);

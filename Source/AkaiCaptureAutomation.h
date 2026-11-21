@@ -118,7 +118,12 @@ public:
             return Decision{cmd,b,stage_};
         };
         if(!isRunning())return result();
-        if(!o.firmwareReady)return finish(Stage::TimedOut);
+        // A WAV can be staged while the original Akai firmware is still
+        // booting. Wait (bounded by WaitWav's 30s timeout) rather than
+        // discarding a valid import. Never press keys until the OS is ready.
+        // Losing firmware readiness after an action starts still aborts.
+        if(!o.firmwareReady && stage_!=Stage::WaitWav)
+            return finish(Stage::TimedOut);
         if (o.readable && overwriteWarning(o.lcd))
             return finish(Stage::OverwriteRisk);
         // Before GO, a replaced/unloaded WAV must abort; never record
@@ -157,7 +162,7 @@ public:
         }
         switch(stage_) {
             case Stage::WaitWav:
-                if(o.wavReady && o.readable){
+                if(o.firmwareReady && o.wavReady && o.readable){
                     // If already on record setup, don't press SAMPLE again.
                     if(contains(o.lcd,"RECORD SET-UP")) {
                         transition(Stage::PressRec,ms);
