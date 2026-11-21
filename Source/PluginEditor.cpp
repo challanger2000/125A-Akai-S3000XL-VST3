@@ -1354,10 +1354,29 @@ void EnsoniqSD1AudioProcessorEditor::mouseDown(const juce::MouseEvent& e) {
         // DATA ENTRY dial zones (btn_dial_dec=36 left, btn_dial_inc=37 right): click = 1 step,
         // then drag up/down to turn continuously.
         if (mpcIdx == 36 || mpcIdx == 37) {
-            int step = (mpcIdx == 37) ? 1 : -1;
-            const int dv = (audioProcessor.dialValue.load(std::memory_order_relaxed) + step) & 0xFF;
-            audioProcessor.dialValue.store(dv, std::memory_order_relaxed);
-            dialDragActive = true; dialDragLastY = e.y; mpcPressedIndex = -1;
+            // P044: the editor must not change an external hardware input
+            // without also changing the automatable/saved host parameter.
+            // The original MAME device saves its INTERNAL encoder position;
+            // mismatched host DATAENTRY at project restore produces spurious
+            // knob turns and selects a different original Akai sample.
+            if (auto* parameter = audioProcessor.apvts.getParameter("data_entry")) {
+                parameter->beginChangeGesture();
+                if (e.mods.isCtrlDown()) {
+                    audioProcessor.dialValue.store(0,std::memory_order_release);
+                    parameter->setValueNotifyingHost(parameter->getDefaultValue());
+                    parameter->endChangeGesture();
+                    dialDragActive = false;
+                } else {
+                    const int step = mpcIdx == 37 ? 1 : -1;
+                    const int dv = (audioProcessor.dialValue.load(
+                        std::memory_order_acquire) + step) & 0xff;
+                    audioProcessor.dialValue.store(dv,std::memory_order_release);
+                    parameter->setValueNotifyingHost(float(dv) / 255.0f);
+                    dialDragActive = true;
+                    dialDragLastY = e.y;
+                }
+            }
+            mpcPressedIndex = -1;
             return;
         }
         mpcPressedIndex = mpcIdx;
@@ -1391,7 +1410,12 @@ void EnsoniqSD1AudioProcessorEditor::mouseUp(const juce::MouseEvent& e) {
         repaint();
         return;
     }
-    if (dialDragActive) { dialDragActive = false; return; }
+    if (dialDragActive) {
+        dialDragActive = false;
+        if (auto* parameter = audioProcessor.apvts.getParameter("data_entry"))
+            parameter->endChangeGesture();
+        return;
+    }
     // S3000XL: release the button pressed via buttonParams on mouse-down.
     if (mpcPressedIndex >= 0) {
         if (mpcPressedIndex < (int) audioProcessor.buttonParams.size() && audioProcessor.buttonParams[mpcPressedIndex])
@@ -1432,10 +1456,14 @@ void EnsoniqSD1AudioProcessorEditor::mouseDrag(const juce::MouseEvent& e) {
         return;
     }
     if (dialDragActive) {
-        int steps = (dialDragLastY - e.y) / 2;   // drag up = increase; ~2 px per step
+        const int steps = (dialDragLastY - e.y) / 2; // drag up = increase
         if (steps != 0) {
-            const int dv = (audioProcessor.dialValue.load(std::memory_order_relaxed) + steps) & 0xFF;
-            audioProcessor.dialValue.store(dv, std::memory_order_relaxed);
+            const int dv = (audioProcessor.dialValue.load(
+                std::memory_order_acquire) + steps) & 0xff;
+            if (auto* parameter = audioProcessor.apvts.getParameter("data_entry")) {
+                audioProcessor.dialValue.store(dv,std::memory_order_release);
+                parameter->setValueNotifyingHost(float(dv) / 255.0f);
+            }
             dialDragLastY = e.y;
         }
         return;
