@@ -65,10 +65,11 @@ inline Dump encodeMono(std::span<const std::int16_t> mono,std::uint32_t rate,
 }
 // P032: Convert one authentic SDS dump into a Standard MIDI File.
 // MAME's native .syx parser inserts 100ms silence after each SysEx packet.
-// The real owner-ROM accepts 42 MIDI ticks between packets: 43.75ms at
-// 500000us/quarter, safely above the 40.64ms wire time for 127 bytes.
-// Crucially this prevents MAME midiin's 131072-byte TX ring from flooding
-// for ordinary WAVs that would exceed it if all packets shared tick zero.
+// The real owner-ROM also accepts 64 consecutive 127-byte packets in
+// one MIDI event (8128 queued bytes). Space events 2500 ticks apart:
+// 2604.17ms at 500000us/quarter, longer than 64*40.64ms wire time.
+// This prevents 131072-byte MAME midi-in TX ring flooding for long WAVs
+// and avoids the upstream parser's O(N^2) event lookup across 50000 packets.
 inline std::vector<std::uint8_t> toTimedMidiFile(const Dump& dump) {
  const auto expected=21u+127u*dump.packets();
  if(dump.frames==0 || dump.sysex.size()!=expected)
@@ -91,7 +92,11 @@ inline std::vector<std::uint8_t> toTimedMidiFile(const Dump& dump) {
   if(offset+bytes>dump.sysex.size() ||
      dump.sysex[offset]!=0xf0 || dump.sysex[offset+bytes-1]!=0xf7)
    throw std::invalid_argument("Malformed original Akai SDS SysEx boundary");
-  length(std::uint32_t(i==0?0:42)); // MIDI ticks, not milliseconds
+  // Header at time 0; first 64 packets at +10 ticks; the next
+  // 64-packet batch at +2500 ticks (8128 bytes needs 2600.96ms on UART).
+  // Never queue more than 8128 bytes as one MAME MIDI event.
+  const auto ticks=i==0?0u: i==1?10u: ((i-1)%64u)==0 ? 2500u:0u;
+  length(ticks); // original MIDI file tick delta (480 PPQN)
   append(0xf0);
   length(std::uint32_t(bytes-1)); // includes trailing F7 per SMF SysEx
   track.insert(track.end(),dump.sysex.begin()+std::ptrdiff_t(offset+1),
@@ -111,10 +116,17 @@ inline std::vector<std::uint8_t> toTimedMidiFile(const Dump& dump) {
  return out;
 }
 inline std::uint64_t timedMidiTransferMillis(const Dump& dump)noexcept {
- // Each packet occupies 42 ticks at 480 PPQN and 500000us/QN.
- // Approximate emulated time only. Never substitutes for Akai LCD proof.
- return (std::uint64_t(dump.packets())*42u*500u+479u)/480u
-       +1500u;
+ // Firmware UART receives 64 packets / event without internal MIDI image
+ // queue overflow; each full 64 packet batch takes >2.6s of emulated time.
+ // Never use this deadline as evidence that the original sample exists.
+ const auto count=std::uint64_t(dump.packets());
+ if(!count)return 0;
+ const auto groups=(count+63u)/64u;
+ const auto finalPackets=count-64u*(groups-1u);
+ const auto ticks=10u+2500u*(groups-1u);
+ const auto beforeLast=(ticks*25u+23u)/24u;
+ const auto tailWire=(finalPackets*127u*10u*1000u+31249u)/31250u;
+ return beforeLast+tailWire+1500u;
 }
 // Explicitly MONO conversion: MIDI SDS is one Akai mono sample.
 // Stereo requires TWO samples and two separately panned original zones.
