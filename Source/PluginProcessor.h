@@ -42,7 +42,9 @@
 #include "AkaiWavInput.h"
 #include "AkaiWavCaptureState.h"
 #include "AkaiCaptureAutomation.h"
+#include "AkaiMidiSampleDump.h"
 #include "AkaiInstanceAudioState.h"
+#include "AkaiMachineState.h"
 
 //==============================================================================
 
@@ -130,6 +132,20 @@ public:
     std::atomic<bool> requestMameLoad{ false };
     std::atomic<bool> mameStateIsReady{ false };
     juce::WaitableEvent mameStateEvent{ false };
+    // P017 native original-MAME .sta: dedicated IPC, never share legacy vst_temp.
+    // Request/complete generations distinguish a late save from the requested
+    // one. Emulation-thread owns the actual MAME save/load, not the DAW thread.
+    std::atomic<std::uint32_t> nativeSnapshotRequested{0};
+    std::atomic<std::uint32_t> nativeSnapshotFinished{0};
+    std::atomic<bool> nativeSnapshotSucceeded{false};
+    juce::WaitableEvent nativeSnapshotEvent{false};
+    akai::machine_state::RestoreMailbox nativeRestore;
+    std::mutex nativeStateHostMutex;
+    juce::File nativeSnapshotFile() const {
+        return juce::File(instanceTempDir).getChildFile("state")
+            .getChildFile("akai-native-project.sta");
+    }
+
     
     // Countdown timer (in samples) to trigger a delayed MIDI Panic after a state load
     std::atomic<int> panicDelaySamples{ 0 };
@@ -252,7 +268,7 @@ public:
         std::vector<std::atomic<float>*> buttonParams;
 
         // --- DATA ENTRY dial (analog) state ---
-        std::atomic<int> dialValue { 128 };      // 0..255 analog position
+        std::atomic<int> dialValue { 0 };        // 0..255 external hardware input; MAME m_last_dial starts at 0
         bool dialIncPrev = false, dialDecPrev = false;
 
 #ifndef JucePlugin_PreferredChannelConfigurations
@@ -330,11 +346,17 @@ public:
     static constexpr int SAMPLER_IN_CHANNELS = 2;
     void pushAudioToMame(const juce::AudioBuffer<float>& buffer, int numInputChannels, int numSamples);
     int  pullAudioForMame(int16_t* dest, int frames);
-    // WAV is decoded and converted on the UI/control thread, then streamed
-    // through the MAME microphone/A-D path only AFTER original firmware GO.
-    // Double-buffered immutable assets; no locks/allocations on MAME/audio threads.
-    bool stageWavForCapture(const juce::File& file, juce::String& error);
-    void clearStagedWav() noexcept;
+    // P046: External WAV-file imports intentionally removed. Keep legacy
+    // state counters only for compatibility/fail-closed recall; their
+    // import-request flags are never set by the editor or public API.
+    std::atomic<bool> originalSdsRequested{false};
+    std::atomic<int> originalSdsStage{0}; // 0 idle, 1 staged, 2 original UART, 3 transferred, 4 error
+    std::atomic<bool> originalSdsRecallRejected{false}; // DAW loaded a partial SDS state; report once in UI
+    std::atomic<std::uint16_t> originalSdsNextSampleNumber{99};
+    std::mutex originalSdsMutex;
+    std::string originalSdsPendingPath;
+    std::uint64_t originalSdsPendingDurationMs=0;
+    juce::String originalSdsLastWavName;
     // The automation may only read the ACTUAL armed WAV asset after the
     // MAME source thread has acknowledged the new immutable input slot.
     bool wavAcceptedByEngine() const noexcept {
@@ -355,6 +377,7 @@ public:
     juce::String stagedWavName;
     std::atomic<int> wavState{0}; // 0 none, 1 armed, 2 recording, 3 source finished
     std::atomic<std::uint64_t> wavFramesDelivered{0};           // returns frames actually supplied
+    std::atomic<std::uint32_t> wavTargetRecordCentis{0}; // off-thread WAV length, firmware SET-UP only
     uint64_t getSamplerInWritten() const { return samplerInWritten.load(std::memory_order_acquire); }
     uint64_t getSamplerInRead()    const { return samplerInRead.load(std::memory_order_acquire); }
 

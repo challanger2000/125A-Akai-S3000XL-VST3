@@ -17,7 +17,6 @@
 //==============================================================================
 
 class EnsoniqSD1AudioProcessorEditor  : public juce::AudioProcessorEditor,
-                                        public juce::FileDragAndDropTarget,
                                         private juce::Timer
 {
 public:
@@ -36,8 +35,6 @@ public:
     void mouseDrag (const juce::MouseEvent& e) override;
     void mouseMove (const juce::MouseEvent& e) override;
     void mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel) override;
-    bool isInterestedInFileDrag(const juce::StringArray& files) override;
-    void filesDropped(const juce::StringArray& files, int x, int y) override;
 
     // --- S3000XL panel click -> buttonParams[] (reliable set_value path) ---
     int mpcHitTest(int px, int py);
@@ -79,8 +76,6 @@ private:
     juce::TextButton loadMediaButton { "MEDIA" };
     std::unique_ptr<juce::FileChooser> fileChooser;
     void loadMediaButtonClicked();
-    void importWavFile(const juce::File& file);
-    int lastCaptureNotice = 0; // UI-only, one alert per terminal result
 
     // --- SETTINGS PANEL GUI COMPONENTS ---
     juce::TextButton settingsButton { "Settings / About" };

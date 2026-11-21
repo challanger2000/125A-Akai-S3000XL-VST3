@@ -73,6 +73,12 @@
 #define VST_TRACE 0
 #define VST_LOG(...) do { if (VST_TRACE && mameMachine != nullptr) mameMachine->logerror(__VA_ARGS__); } while (0)
 #include "diimage.h"
+#include "imagedev/midiin.h" // P030 actual original Akai UART input-image, not RAM access
+#include "AkaiSdsAssignment.h" // P031 original LCD keygroup verification
+#include "AkaiSdsBootGate.h" // P035 original firmware boot before MIDI SDS
+#include "AkaiSdsStateGuard.h" // P036 no DAW recall snapshot mid SDS
+#include "AkaiDialRecall.h" // P044 original MAME external rotary input on state recall
+#include "AkaiMidiPortGuard.h" // P042 missing .mid must not become fake MIDI port
 
 #include <iomanip>
 #include <fstream>
@@ -196,78 +202,12 @@ void EnsoniqSD1AudioProcessor::pushAudioToMame(const juce::AudioBuffer<float>& b
 }
 
 
-// P003: transactional WAV staging. The UI/control thread is the only writer
-// and all file I/O/decoding/resampling/allocation is confined to this call.
-bool EnsoniqSD1AudioProcessor::stageWavForCapture(const juce::File& file,
-                                                   juce::String& error)
-{
-    if (!file.existsAsFile()) {error="The WAV file does not exist.";return false;}
-    const auto length=file.getSize();
-    if (length<44 || length>static_cast<juce::int64>(akai::wav::maxFileBytes)) {
-        error="The WAV must be 44 bytes to 64 MiB in size.";return false;
-    }
-    // Do not read/decode during playback or before engine readiness changes the
-    // accepted ROM state. The staged sample is only fed on a real firmware GO.
-    const auto wavReplacementPermitted=[this]() noexcept {
-        const auto status=static_cast<akai::wav_capture::State>(
-            wavState.load(std::memory_order_acquire));
-        const int autoStage=autoCaptureStage.load(std::memory_order_acquire);
-        const bool automationActive=autoStage>=int(akai::capture::Stage::WaitWav)
-            && autoStage<=int(akai::capture::Stage::WaitStop);
-        const bool firmwareRecording=firmwareWadcsKnown.load(std::memory_order_acquire)
-            && (firmwareWadcsLatch.load(std::memory_order_acquire)&0x08)!=0;
-        return akai::wav_capture::canStage(status,firmwareRecording,automationActive,
-            wavPendingSlot.load(std::memory_order_acquire)!=-1,
-            wavClearPending.load(std::memory_order_acquire));
-    };
-    if(!wavReplacementPermitted()) {
-        error="WAV capture is in progress or a staged change is pending. "
-              "Finish or cancel the Akai recording before importing another WAV.";
-        return false;
-    }
-    try {
-        juce::FileInputStream stream(file);
-        if (stream.failedToOpen()) {error="Could not open WAV file.";return false;}
-        std::vector<std::uint8_t> bytes(static_cast<std::size_t>(length));
-        if (stream.read(bytes.data(),int(bytes.size()))!=int(bytes.size())) {
-            error="Incomplete WAV file read.";return false;
-        }
-        const auto audio=akai::wav::decode(bytes);
-        const auto rate=static_cast<std::uint32_t>(std::lround(
-            hostSampleRate.load(std::memory_order_acquire)));
-        auto prepared=std::make_unique<akai::wav::Prepared>(
-            akai::wav::prepare(audio,rate));
-        // Never write the slot currently used by MAME. Keep both slots alive
-        // until a switch is acknowledged; no shared_ptr atomics on RT threads.
-        std::lock_guard<std::mutex> lock(wavStageMutex);
-        if(!wavReplacementPermitted()) {
-            error="WAV capture began while this WAV was decoding. "
-                  "The current Akai recording was preserved.";
-            return false;
-        }
-        const int inactive=wavCurrentSlot.load(std::memory_order_acquire)==0?1:0;
-        wavSlots[inactive]=std::move(prepared);
-        stagedWavName=file.getFileName();
-        wavFramesDelivered.store(0,std::memory_order_release);
-        wavState.store(1,std::memory_order_release);
-        // Capture the firmware event counter before publishing the asset:
-        // GO between GUI publication and engine acceptance must not be lost.
-        wavStagedGoSerial.store(wavGoSerial.load(std::memory_order_acquire),
-                                std::memory_order_release);
-        wavPendingSlot.store(inactive,std::memory_order_release);
-        return true;
-    } catch(const std::exception& e) {
-        error=juce::String(e.what());
-        return false;
-    }
-}
-void EnsoniqSD1AudioProcessor::clearStagedWav() noexcept
-{
-    // Old immutable assets are not deleted until a future UI-stage overwrite
-    // or processor destruction, when MAME is no longer using their memory.
-    wavClearPending.store(true,std::memory_order_release);
-}
-
+// P046: External file-to-sample import was removed at the owner's request.
+// Neither the old WAV-to-ADC recording path nor the WAV-to-MIDI-SDS path
+// has a public function that can create or schedule a transfer. Native Akai
+// panel recording, ordinary host MIDI and disk-image mounting are unchanged.
+// Legacy native machine-state and import-failure recall guards are retained.
+//
 int EnsoniqSD1AudioProcessor::pullAudioForMame(int16_t* dest, int frames)
 {
     if (dest == nullptr || frames <= 0)
@@ -482,7 +422,13 @@ void EnsoniqSD1AudioProcessor::pushAudioFromMame(const int16_t* pcmBuffer, int n
             
                         // --- DEADLOCK BREAKER ---
 
-                        if (requestMameSave.load(std::memory_order_acquire) || requestMameLoad.load(std::memory_order_acquire)) {
+                        if (requestMameSave.load(std::memory_order_acquire)
+                            || requestMameLoad.load(std::memory_order_acquire)
+                            || nativeRestore.needsService()
+                            || nativeSnapshotRequested.load(std::memory_order_acquire)
+                               != nativeSnapshotFinished.load(std::memory_order_acquire)) {
+                            // P017: a throttled native MAME sink must not block
+                            // the only owner thread that can execute state I/O.
                             break;
                         }
                         
@@ -792,6 +738,15 @@ private:
     int audioMacroHeldBank = -1;   // audio-thread-only: which bank is electronically held
     akai::capture::Controller captureController; // MAME/OSD owner thread only
     int captureHeldIndex = -1; // only release buttons this controller pressed
+    bool originalSdsTransferActive=false; // native MAME owner only
+    bool originalSdsSavedMidiSuppression=false; // restore prior DAW MIDI gate
+    std::uint64_t originalSdsFinishAtMs=0;
+    akai::sds::Assignment originalSdsAssignment;
+    int originalSdsHeldIndex=-1;
+    akai::sds::BootGate originalSdsBoot;
+    int originalSdsBootHeldIndex=-1;
+    akai::machine_state::RestoreMailbox::Work nativeRestoreInFlight{}; // MAME owner only
+    akai::machine_state::SnapshotBarrier nativeSnapshotInFlight{}; // MAME owner only
     
     render_target* main_target = nullptr;
 
@@ -938,8 +893,114 @@ public:
 #endif // SD1_DEBUG_RACK_PANEL
                 }
                         
+        // P017 native full MAME snapshot. Never use unsafe guest-RAM reads
+        // to simulate a complete project state. All MAME save/restore operations
+        // run ONLY on this MAME owner thread, outside the host audio callback.
+        // MAME 0.288 immediate_load is NOT guaranteed immediate:
+        // pending anonymous timers can defer it to a later machine timeslice.
+        // Never let a subsequent save or new load overwrite that pending LOAD.
+        if (nativeRestoreInFlight && !mame_machine->save_or_load_pending()) {
+            processor->nativeRestore.finish(nativeRestoreInFlight,true);
+            nativeRestoreInFlight={};
+        }
+        if (!nativeRestoreInFlight && !nativeSnapshotInFlight.active()
+            && !mame_machine->save_or_load_pending()) {
+            if (const auto work=processor->nativeRestore.take()) {
+                bool issued=false;
+                if(work.bytes->size()>=32
+                   && work.bytes->size()<=akai::machine_state::maxSnapshot) {
+                    auto dest=processor->nativeSnapshotFile();
+                    if(dest.getParentDirectory().createDirectory().wasOk()) {
+                        dest.deleteFile(); // no stale snapshot on failed write
+                        auto stream=dest.createOutputStream();
+                        if(stream && stream->openedOk()
+                            && stream->write(work.bytes->data(),work.bytes->size())) {
+                            stream->flush();
+                            stream.reset();
+                            // P044: original MAME saves the INTERNAL Akai
+                            // m_last_dial (the firmware's endless rotary
+                            // encoder reference), but its external analog
+                            // DATAENTRY input is host-owned. Before loading
+                            // the original .sta, preposition that external
+                            // input to the matching project value. Otherwise
+                            // the next original 60-Hz dial tick interprets
+                            // the fresh host's default 0 as an intentional
+                            // backward turn from saved 2 and swaps MIDI 99
+                            // back to PULSE (owner original-ROM A/B proof).
+                            if (auto* dport=mame_machine->root_device()
+                                    .ioport(":DATAENTRY")) {
+                                if (auto* dfield=dport->field(0xff)) {
+                                    if (dfield->live().analog) {
+                                        const int savedExternal=processor->dialValue
+                                            .load(std::memory_order_acquire) & 0xff;
+                                        dfield->live().analog->set_value(savedExternal);
+                                    }
+                                }
+                            }
+                            mame_machine->immediate_load(
+                                dest.getFullPathName().toStdString());
+                            issued=true;
+                        }
+                    }
+                }
+                if (!issued) {
+                    processor->nativeRestore.finish(work,false);
+                } else if (mame_machine->save_or_load_pending()) {
+                    // Keep the owner image alive until the scheduler resolves
+                    // the load (or aborts it). Completion is not PCM proof.
+                    nativeRestoreInFlight=work;
+                } else {
+                    processor->nativeRestore.finish(work,true);
+                }
+            }
+        }
+        // Complete only the original generation after the MAME scheduler
+        // has resolved its own possibly deferred full-machine .sta SAVE.
+        auto finishSnapshot = [&]() {
+            const auto file=processor->nativeSnapshotFile();
+            bool valid=file.existsAsFile() && file.getSize()>=32
+                && file.getSize()<=static_cast<juce::int64>(akai::machine_state::maxSnapshot);
+            if(valid) {
+                juce::FileInputStream read(file);
+                char magic[8]{};
+                valid=read.openedOk() && read.read(magic,8)==8
+                    && std::memcmp(magic,"MAMESAVE",8)==0;
+            }
+            processor->nativeSnapshotSucceeded.store(valid,std::memory_order_release);
+            processor->nativeSnapshotFinished.store(nativeSnapshotInFlight.sequence(),
+                                                    std::memory_order_release);
+            nativeSnapshotInFlight.clear();
+            processor->nativeSnapshotEvent.signal();
+        };
+        if(nativeSnapshotInFlight.ready(mame_machine->save_or_load_pending()))
+            finishSnapshot();
+        const auto seq=processor->nativeSnapshotRequested.load(std::memory_order_acquire);
+        if(seq!=processor->nativeSnapshotFinished.load(std::memory_order_acquire)
+           && !nativeSnapshotInFlight.active()
+           && !processor->nativeRestore.needsService()
+           && nativeSnapshotInFlight.begin(seq,mame_machine->save_or_load_pending(),
+                                           bool(nativeRestoreInFlight))) {
+            const auto file=processor->nativeSnapshotFile();
+            if(file.getParentDirectory().createDirectory().wasOk()
+               && (!file.existsAsFile() || file.deleteFile())) {
+                // A stale file MUST NOT turn a failed deferred save green.
+                mame_machine->immediate_save(file.getFullPathName().toStdString());
+                if(nativeSnapshotInFlight.ready(mame_machine->save_or_load_pending()))
+                    finishSnapshot();
+                // Otherwise MAME has deferred the save. A later update will
+                // acknowledge only this generation after the file is written.
+            } else {
+                // Missing directory / unwritable file: deterministic failure,
+                // not a six-second host deadlock or infinite per-frame retry.
+                finishSnapshot();
+            }
+        }
+
         // --- SYNCHRONIZED MAME STATE SAVING ---
-        if (processor->requestMameSave.load(std::memory_order_acquire)) {
+        if (processor->requestMameSave.load(std::memory_order_acquire)
+            && akai::machine_state::mayStartSnapshot(
+               mame_machine->save_or_load_pending(),bool(nativeRestoreInFlight))
+            && !processor->nativeRestore.needsService()) {
         if (saveFrameDelay == 0) { // Only call it the first time
             mame_machine->schedule_save("vst_temp");
             saveFrameDelay = 3;
@@ -956,7 +1017,10 @@ public:
                 }
 
         // --- SYNCHRONIZED MAME STATE LOADING ---
-        if (processor->requestMameLoad.load(std::memory_order_acquire)) {
+        if (processor->requestMameLoad.load(std::memory_order_acquire)
+            && akai::machine_state::mayStartSnapshot(
+               mame_machine->save_or_load_pending(),bool(nativeRestoreInFlight))
+            && !processor->nativeRestore.needsService()) {
             if (loadFrameDelay == 0) { // Only call it the first time
                 mame_machine->schedule_load("vst_temp");
                 loadFrameDelay = 3;
@@ -1312,7 +1376,9 @@ public:
                     processor->autoCaptureStage.store(int(action.stage),std::memory_order_release);
                 }
                 if(processor->autoCaptureRequest.exchange(false,std::memory_order_acq_rel)) {
-                    if(captureController.start(nowMs))
+                    if(captureController.start(nowMs,
+                         processor->wavTargetRecordCentis.load(
+                             std::memory_order_acquire)))
                         processor->autoCaptureStage.store(
                             int(captureController.stage()),std::memory_order_release);
                 }
@@ -1337,10 +1403,28 @@ public:
                     auto findIndex=[&](akai::capture::Button key) {
                         const char* tag=nullptr;
                         switch(key) {
+                        case akai::capture::Button::SelectSingle:tag="btn_single";break;
+                        case akai::capture::Button::EditProgram:tag="btn_edit";break;
+                        case akai::capture::Button::KeygroupsF2:tag="btn_f2";break;
+                        case akai::capture::Button::SamplePageF6:tag="btn_f6";break;
                         case akai::capture::Button::Sample:tag="btn_sample";break;
                         case akai::capture::Button::RecF2:tag="btn_f2";break;
                         case akai::capture::Button::ArmF8:tag="btn_f8";break;
                         case akai::capture::Button::GoF7:tag="btn_f7";break;
+                        case akai::capture::Button::Name:tag="btn_name";break;
+                        case akai::capture::Button::Enter:tag="btn_enter";break;
+                        case akai::capture::Button::CursorDown:tag="btn_down";break;
+                        case akai::capture::Button::CursorRight:tag="btn_right";break;
+                        case akai::capture::Button::Digit0:tag="btn_key0";break;
+                        case akai::capture::Button::Digit1:tag="btn_key1";break;
+                        case akai::capture::Button::Digit2:tag="btn_key2";break;
+                        case akai::capture::Button::Digit3:tag="btn_key3";break;
+                        case akai::capture::Button::Digit4:tag="btn_key4";break;
+                        case akai::capture::Button::Digit5:tag="btn_key5";break;
+                        case akai::capture::Button::Digit6:tag="btn_key6";break;
+                        case akai::capture::Button::Digit7:tag="btn_key7";break;
+                        case akai::capture::Button::Digit8:tag="btn_key8";break;
+                        case akai::capture::Button::Digit9:tag="btn_key9";break;
                         default:return -1;
                         }
                         for(size_t n=0;n<processor->sd1Buttons.size();++n)
@@ -1376,6 +1460,195 @@ public:
                         processor->autoCaptureStage.store(
                             int(captureController.stage()),std::memory_order_release);
                 }
+            }
+            // P030 original Akai MIDI receive. MAME owner thread invokes the real
+            // midiin image device, which serializes each genuine SDS SysEx packet
+            // through the Akai UART. This uses original firmware to create PCM.
+            {
+                const double t=mame_machine->time().as_double();
+                const std::uint64_t now=(std::isfinite(t)&&t>=0.0)
+                    ?std::uint64_t(t*1000.0):0;
+                auto* in=mame_machine->root_device().subdevice<midiin_device>(
+                    "mdin:midiin:midiinimg");
+                // A powered MAME V53 motherboard is NOT a ready S3000XL OS.
+                // Original V2.0 may display its HDD-ready wait and requires
+                // the REAL F8 SKIP key. Never send SDS into that boot screen.
+                if(processor->originalSdsRequested.load(std::memory_order_acquire)
+                    && !captureController.isRunning() && !originalSdsBoot.ready()
+                    && !originalSdsBoot.active()
+                    && originalSdsBoot.phase()!=akai::sds::BootPhase::Failed)
+                    (void)originalSdsBoot.start(now);
+                if(originalSdsBoot.active()) {
+                    char lcd[321]{};
+                    auto* display=mame_machine->root_device()
+                        .subdevice<hd61830_device>("lcdc");
+                    const bool readable=display!=nullptr &&
+                        display->snapshot_visible_text(lcd,sizeof(lcd));
+                    const auto action=originalSdsBoot.step(
+                        readable?std::string_view(lcd,320):std::string_view{},
+                        readable,
+                        processor->mameIsFullyBooted.load(std::memory_order_acquire),
+                        now);
+                    if(action.action==akai::sds::BootAction::PressF8) {
+                        for(size_t index=0;index<processor->sd1Buttons.size();++index)
+                            if(processor->sd1Buttons[index].paramID=="btn_f8"
+                               && index<processor->buttonParams.size()
+                               && processor->buttonParams[index]
+                               && processor->buttonParams[index]->load(
+                                  std::memory_order_acquire)<=0.5f) {
+                                processor->buttonParams[index]->store(
+                                    1.f,std::memory_order_release);
+                                originalSdsBootHeldIndex=int(index);break;
+                            }
+                        if(originalSdsBootHeldIndex<0)
+                            (void)originalSdsBoot.fail();
+                    } else if(action.action==akai::sds::BootAction::ReleaseF8) {
+                        if(originalSdsBootHeldIndex>=0 &&
+                           originalSdsBootHeldIndex<int(processor->buttonParams.size())) {
+                            processor->buttonParams[size_t(originalSdsBootHeldIndex)]
+                                ->store(0.f,std::memory_order_release);
+                            originalSdsBootHeldIndex=-1;
+                        }
+                    }
+                    if(originalSdsBoot.phase()==akai::sds::BootPhase::Failed) {
+                        // Roll back any key this controller pressed. Never
+                        // release a key independently held by the user.
+                        if(originalSdsBootHeldIndex>=0 &&
+                           originalSdsBootHeldIndex<int(processor->buttonParams.size())) {
+                            processor->buttonParams[size_t(originalSdsBootHeldIndex)]
+                                ->store(0.f,std::memory_order_release);
+                            originalSdsBootHeldIndex=-1;
+                        }
+                        processor->originalSdsRequested.store(
+                            false,std::memory_order_release);
+                        processor->originalSdsStage.store(
+                            4,std::memory_order_release);
+                    }
+                }
+                if(originalSdsTransferActive && now>=originalSdsFinishAtMs) {
+                    originalSdsTransferActive=false;
+                    processor->clearMidiBuffer(); // discard stale host notes
+                    // The actual input image's UART stream must be allowed to
+                    // drain before restoring DAW live MIDI. This is not an
+                    // assertion that original firmware assigned a program.
+                    if(in) {
+                        const auto restored=in->load("VST MIDI");
+                        processor->originalSdsStage.store(
+                            restored.first ? 4:5,std::memory_order_release);
+                        if(!restored.first)
+                            (void)originalSdsAssignment.start(now);
+                        processor->suppressMidiInput.store(
+                            originalSdsSavedMidiSuppression,
+                            std::memory_order_release);
+                    } else {
+                        processor->originalSdsStage.store(
+                            4,std::memory_order_release);
+                        processor->suppressMidiInput.store(
+                            originalSdsSavedMidiSuppression,
+                            std::memory_order_release);
+                    }
+                }
+                if(!originalSdsTransferActive &&
+                   processor->originalSdsRequested.load(std::memory_order_acquire) &&
+                   originalSdsBoot.ready() &&
+                   !captureController.isRunning() &&
+                   !nativeRestoreInFlight && !nativeSnapshotInFlight.active() &&
+                   !mame_machine->save_or_load_pending()) {
+                    std::string staged;
+                    std::uint64_t duration=0;
+                    {
+                        std::lock_guard<std::mutex> lock(processor->originalSdsMutex);
+                        staged=processor->originalSdsPendingPath;
+                        duration=processor->originalSdsPendingDurationMs;
+                        processor->originalSdsRequested.store(
+                            false,std::memory_order_release);
+                    }
+                    if(in && !staged.empty() && duration>0) {
+                        originalSdsSavedMidiSuppression=
+                            processor->suppressMidiInput.exchange(
+                                true,std::memory_order_acq_rel);
+                        processor->clearMidiBuffer();
+                        const auto status=in->load(staged);
+                        if(!status.first) {
+                            originalSdsTransferActive=true;
+                            originalSdsFinishAtMs=now+duration;
+                            processor->originalSdsStage.store(
+                                2,std::memory_order_release);
+                        } else {
+                            processor->originalSdsStage.store(
+                                4,std::memory_order_release);
+                            (void)in->load("VST MIDI");
+                            processor->suppressMidiInput.store(
+                                originalSdsSavedMidiSuppression,
+                                std::memory_order_release);
+                        }
+                    } else processor->originalSdsStage.store(
+                        4,std::memory_order_release);
+                }
+            }
+            // P031: only genuine original Akai panel keys and the live
+            // HD61830 original LCD can confirm a MIDI-imported keygroup.
+            if(originalSdsAssignment.running()) {
+                const double t=mame_machine->time().as_double();
+                const auto now=(std::isfinite(t)&&t>=0.0)
+                    ?std::uint64_t(t*1000.0):0;
+                char lcd[321]{};
+                auto* display=mame_machine->root_device()
+                    .subdevice<hd61830_device>("lcdc");
+                const bool readable=display!=nullptr &&
+                    display->snapshot_visible_text(lcd,sizeof(lcd));
+                const auto decision=originalSdsAssignment.step(
+                    readable?std::string_view(lcd,320):std::string_view{},
+                    readable,
+                    processor->mameIsFullyBooted.load(std::memory_order_acquire),
+                    now);
+                if(decision.action==akai::sds::Action::DialIncrement) {
+                    const auto prior=processor->dialValue.load(
+                        std::memory_order_relaxed)&255;
+                    // Original V2.0: two clockwise ticks select MIDI 99
+                    // from initial SINE. Real LCD echo is still mandatory.
+                    processor->dialValue.store((prior+1)&255,
+                                               std::memory_order_release);
+                } else if(decision.action==akai::sds::Action::Down) {
+                    const char* id="";
+                    switch(decision.button) {
+                    case akai::sds::Button::Single:id="btn_single";break;
+                    case akai::sds::Button::Edit:id="btn_edit";break;
+                    case akai::sds::Button::F2:id="btn_f2";break;
+                    case akai::sds::Button::F6:id="btn_f6";break;
+                    default:break;
+                    }
+                    int ix=-1;
+                    for(size_t i=0;i<processor->sd1Buttons.size();++i)
+                        if(processor->sd1Buttons[i].paramID==id) {
+                            ix=int(i);break;
+                        }
+                    if(ix>=0 && ix<int(processor->buttonParams.size()) &&
+                       processor->buttonParams[size_t(ix)] &&
+                       processor->buttonParams[size_t(ix)]->load(
+                           std::memory_order_acquire)<=0.5f) {
+                        processor->buttonParams[size_t(ix)]->store(
+                            1.f,std::memory_order_release);
+                        originalSdsHeldIndex=ix;
+                    } else {
+                        (void)originalSdsAssignment.fail();
+                        processor->originalSdsStage.store(7,
+                                                         std::memory_order_release);
+                    }
+                } else if(decision.action==akai::sds::Action::Up) {
+                    if(originalSdsHeldIndex>=0 &&
+                       originalSdsHeldIndex<int(processor->buttonParams.size())) {
+                        processor->buttonParams[size_t(originalSdsHeldIndex)]
+                            ->store(0.f,std::memory_order_release);
+                        originalSdsHeldIndex=-1;
+                    }
+                }
+                if(originalSdsAssignment.verified())
+                    processor->originalSdsStage.store(6,
+                                                     std::memory_order_release);
+                else if(originalSdsAssignment.phase()==akai::sds::Phase::Failed)
+                    processor->originalSdsStage.store(7,
+                                                     std::memory_order_release);
             }
             // ==============================================================================
             // --- 1. MOUSE INJECTION ---
@@ -1552,6 +1825,11 @@ public:
     virtual bool execute_command(const char *command) override { return false; };
 
     virtual std::unique_ptr<osd::midi_input_port> create_midi_input(std::string_view name) override {
+        // P042: MAME's midi image device attempts to fall back to an OSD MIDI
+        // port when a .mid path cannot be opened. Accepting ANY name here
+        // made a deleted/corrupt SDS import file appear successfully loaded
+        // while the original Akai firmware received no sample at all.
+        if (!akai::sds::isLiveVstMidiInputPort(name)) return {};
         return std::make_unique<VstMidiInputPort>(processor);
     };
     
@@ -1666,8 +1944,12 @@ void EnsoniqSD1AudioProcessor::parameterChanged(const juce::String& parameterID,
                 pushMidiByte(val, targetMameTime);
             }
             else if (parameterID == "data_entry") {
-                // DAW "Data Entry" slider (0..1) -> S3000XL data-entry dial (0..255).
-                dialValue.store(((int)(newValue * 255.0f)) & 0xFF, std::memory_order_relaxed);
+                // P044: use exact nearest-step quantization, not truncation;
+                // 2/255 must restore physical position 2, not 1.
+                // Reject malformed automation without fabricating a turn.
+                int decoded=0;
+                if (akai::dial_recall::decodeNormalized(newValue,decoded))
+                    dialValue.store(decoded,std::memory_order_release);
             }
         }
 }
@@ -1835,6 +2117,9 @@ void EnsoniqSD1AudioProcessor::shutdownMame()
                 
         mameThrottleEvent.signal();
         mameStateEvent.signal();
+        // Abort any host waiting on this particular MAME instance.
+        nativeSnapshotSucceeded.store(false,std::memory_order_release);
+        nativeSnapshotEvent.signal();
         
         if (mameThread.joinable()) {
             mameThread.join();
@@ -2839,10 +3124,9 @@ bool EnsoniqSD1AudioProcessor::extractLegacyMameState(const juce::String& base64
 //==============================================================================
 void EnsoniqSD1AudioProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
-    // 1. Save VST parameters to XML
+    // 1. Save VST parameters to XML.
     auto state = apvts.copyState();
     std::unique_ptr<juce::XmlElement> xml (state.createXml());
-
     // --- 1. VERSION STAMPING ---
     xml->setAttribute("plugin_version", "1.0.0");
     
@@ -2859,23 +3143,104 @@ void EnsoniqSD1AudioProcessor::getStateInformation (juce::MemoryBlock& destData)
         xml->setAttribute("is_cart_loaded", isCartLoaded.load());
     }
 
-    // --- 4. DIRECT RAM EXTRACTION (Version Independent) ---
-        if (isMameRunningFlag() && mameMachine != nullptr) {
-            
-            // Request the memory block pointers directly from MAME
-            auto* osram_share = mameMachine->root_device().memshare("osram");
-            auto* seqram_share = mameMachine->root_device().memshare("seqram");
-
-            if (osram_share != nullptr) {
-                juce::MemoryBlock osBlock(osram_share->ptr(), osram_share->bytes());
-                xml->setAttribute("ram_osram", osBlock.toBase64Encoding());
+    // P036: NEVER let a host autosave serialize an Akai MIDI Sample Dump
+    // while the original firmware is receiving it or still selecting the
+    // target keygroup. A valid original MAME .sta is only complete once the
+    // original LCD has confirmed MIDI 99 in zone one.
+    const int sdsImportStage=originalSdsStage.load(std::memory_order_acquire);
+    const bool sdsStateUnsafe=
+        akai::sds::requiresOriginalFirmwareWarning(sdsImportStage);
+    if(sdsStateUnsafe) {
+        xml->setAttribute("akai_native_sds_transfer_incomplete",true);
+        xml->setAttribute("akai_native_sds_stage_at_save",sdsImportStage);
+    }
+    // P017: capture the full original-MAME machine state, including Akai
+    // sample RAM, DSP and CPU registers, not merely old Ensoniq NVRAM.
+    // MAME owner thread performs the operation. This host callback never
+    // reads/writes MAME registers directly for the native snapshot.
+    {
+        std::lock_guard<std::mutex> hostLock(nativeStateHostMutex);
+        juce::MemoryBlock machineBytes;
+        bool haveMachine=false;
+        // An in-flight project restore is more authoritative than whatever
+        // old/empty machine state is currently running. A save while the MAME
+        // worker is restoring must preserve the incoming exact original .sta.
+        const auto unresolved= nativeRestore.unresolved();
+        if(unresolved) {
+            machineBytes.append(unresolved->data(),unresolved->size());
+            haveMachine=true;
+        } else if(!sdsStateUnsafe &&
+                  isMameRunningFlag() &&
+                  mameIsFullyBooted.load(std::memory_order_acquire)) {
+            const auto seq=nativeSnapshotRequested.fetch_add(
+                1,std::memory_order_acq_rel)+1;
+            nativeSnapshotEvent.reset();
+            constexpr int timeoutMs=6000;
+            int waited=0;
+            while(waited<timeoutMs &&
+                  nativeSnapshotFinished.load(std::memory_order_acquire)!=seq) {
+                (void)nativeSnapshotEvent.wait(200);
+                waited+=200;
             }
-            
-            if (seqram_share != nullptr) {
-                juce::MemoryBlock seqBlock(seqram_share->ptr(), seqram_share->bytes());
-                xml->setAttribute("ram_seqram", seqBlock.toBase64Encoding());
+            if(nativeSnapshotFinished.load(std::memory_order_acquire)==seq &&
+               nativeSnapshotSucceeded.load(std::memory_order_acquire)) {
+                const auto path=nativeSnapshotFile();
+                if(path.existsAsFile() && path.getSize()>=32
+                   && path.getSize()<=static_cast<juce::int64>(
+                       akai::machine_state::maxSnapshot)) {
+                    haveMachine=path.loadFileAsData(machineBytes);
+                }
+            }
+        } else {
+            // Preserve an incoming snapshot when DAW saves before firmware boot.
+            const auto retained=nativeRestore.current();
+            if(retained && !retained->empty()) {
+                machineBytes.append(retained->data(),retained->size());
+                haveMachine=true;
             }
         }
+        std::vector<std::uint8_t> envelope;
+        if(!sdsStateUnsafe && haveMachine && akai::machine_state::encode(
+            std::span<const std::uint8_t>(
+                static_cast<const std::uint8_t*>(machineBytes.getData()),
+                machineBytes.getSize()),envelope)) {
+            const juce::MemoryBlock encoded(envelope.data(),envelope.size());
+            xml->setAttribute("akai_native_machine_v1",encoded.toBase64Encoding());
+            xml->setAttribute("akai_native_complete",true);
+            xml->setAttribute("akai_native_restore_failed",
+                              nativeRestore.lastAttemptFailed());
+        } else {
+            // A missing snapshot must be VISIBLE to later QA. Old RAM
+            // fragments are NOT a playable Akai project snapshot.
+            xml->setAttribute("akai_native_complete",false);
+        }
+    }
+
+    // P044: sample the external hardware dial near the just-completed
+    // native MAME save, not at the beginning of a potentially six-second
+    // save request. The original .sta contains the internal m_last_dial,
+    // but the host-owned external analog input position needs its own
+    // portable attribute to avoid an unintended encoder tick on reload.
+    const int physicalDialAtSave=dialValue.load(std::memory_order_acquire)&0xff;
+    xml->setAttribute("akai_native_dial_position",physicalDialAtSave);
+    // Auto keygroup mapping uses the physical dial directly; its APVTS
+    // parameter might not have been notified. Update the serialized
+    // snapshot's PARAM to the same physical position without generating
+    // an additional host automation gesture during the save callback.
+    for(auto* param=xml->getFirstChildElement();param!=nullptr;
+        param=param->getNextElement()) {
+        if(param->hasTagName("PARAM") &&
+           param->getStringAttribute("id")=="data_entry") {
+            param->setAttribute("value",akai::dial_recall::normalized(
+                physicalDialAtSave));
+            break;
+        }
+    }
+
+    // P017: do not access MAME-owned raw shares from the DAW thread.
+    // The complete native .sta envelope above replaces the old partial
+    // OSRAM/SEQRAM snapshot for NEW songs. Existing legacy XML projects
+    // remain readable by the backward-compatible load branch below.
     
     // --- 4.5 FLUSH ACTIVE UI STATE ---
         if (auto* editor = dynamic_cast<EnsoniqSD1AudioProcessorEditor*>(getActiveEditor())) {
@@ -2912,10 +3277,61 @@ void EnsoniqSD1AudioProcessor::setStateInformation (const void* data, int sizeIn
 {
     std::unique_ptr<juce::XmlElement> xmlState (getXmlFromBinary (data, sizeInBytes));
     if (xmlState != nullptr) {
-        
-        // 1. Restore VST Automation Parameters
+        // P036: A DAW snapshot taken while original sample bytes were still
+        // on their way to Akai RAM deliberately contains NO machine image.
+        // Do not silently load such XML and let an old SINE or prior sample
+        // masquerade as a correctly restored user's WAV.
+        if(xmlState->getBoolAttribute("akai_native_sds_transfer_incomplete",false)) {
+            originalSdsRecallRejected.store(true,std::memory_order_release);
+            return; // fail-closed; leave currently running Akai state intact
+        }
+        // Transactionally validate the whole original-MAME state BEFORE
+        // changing APVTS, file paths or any old RAM recall controls.
+        // Malformed data cannot silently fall back to partial guest RAM.
+        std::shared_ptr<const std::vector<std::uint8_t>> validatedNative;
+        const bool hasNative=xmlState->hasAttribute("akai_native_machine_v1");
+        int savedPhysicalDial=0;
+        bool haveSavedPhysicalDial=false;
+        // The host-controlled endless dial is part of the native-machine
+        // restore contract. Reject corrupted new-format values BEFORE
+        // touching the running Akai machine or project parameters.
+        if(hasNative && xmlState->hasAttribute("akai_native_dial_position")) {
+            const auto numeric=xmlState->getStringAttribute(
+                "akai_native_dial_position");
+            if(numeric.isEmpty() || numeric.length()>3)return;
+            for(auto ch:numeric)
+                if(ch<'0' || ch>'9')return;
+            savedPhysicalDial=numeric.getIntValue();
+            if(!akai::dial_recall::validPosition(savedPhysicalDial))return;
+            haveSavedPhysicalDial=true;
+        }
+        if(hasNative) {
+            const auto encoded=xmlState->getStringAttribute("akai_native_machine_v1");
+            if(encoded.length()>static_cast<int>(akai::machine_state::maxSnapshot*2))
+                return;
+            juce::MemoryBlock decoded;
+            if(!decoded.fromBase64Encoding(encoded))
+                return;
+            std::vector<std::uint8_t> raw;
+            if(!akai::machine_state::decode(std::span<const std::uint8_t>(
+                static_cast<const std::uint8_t*>(decoded.getData()),
+                decoded.getSize()),raw))
+                return;
+            validatedNative=std::make_shared<const std::vector<std::uint8_t>>(
+                std::move(raw));
+        }
+        // 1. Restore VST Automation Parameters. For P044-format projects,
+        // the saved PARAM data_entry was also synchronized with the exact
+        // physical dial. It must be applied BEFORE publishing the native
+        // MAME restore to avoid a worker-thread race to the old host value.
         if (xmlState->hasTagName (apvts.state.getType())) {
             apvts.replaceState (juce::ValueTree::fromXml (*xmlState));
+        }
+        if(haveSavedPhysicalDial)
+            dialValue.store(savedPhysicalDial,std::memory_order_release);
+        {
+            std::lock_guard<std::mutex> hostGuard(nativeStateHostMutex);
+            nativeRestore.publish(std::move(validatedNative));
         }
 
         // 2. Restore UI Dimensions
@@ -2988,7 +3404,8 @@ void EnsoniqSD1AudioProcessor::setStateInformation (const void* data, int sizeIn
                 }
 
                 // --- 4. RAM INJECTION BRANCHING ---
-                if (savedVersion == "0.9.7" && xmlState->hasAttribute("mame_state")) {
+                if (!hasNative && savedVersion == "0.9.7"
+                    && xmlState->hasAttribute("mame_state")) {
                     
                     juce::String b64String = xmlState->getStringAttribute("mame_state");
 
@@ -2999,7 +3416,7 @@ void EnsoniqSD1AudioProcessor::setStateInformation (const void* data, int sizeIn
                         isWarmBoot.store(true, std::memory_order_release); // LOAD STATE FLAG
                     }
                 }
-                else if (xmlState->hasAttribute("ram_osram")) {
+                else if (!hasNative && xmlState->hasAttribute("ram_osram")) {
                     
                     // LOAD FROM NEW XML FORMAT
                     pendingOsram.fromBase64Encoding(xmlState->getStringAttribute("ram_osram"));

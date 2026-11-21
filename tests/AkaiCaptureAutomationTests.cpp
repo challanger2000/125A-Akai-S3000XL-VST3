@@ -3,6 +3,7 @@
 #include "../Source/AkaiCaptureAutomation.h"
 #include <cstdio>
 #include <cstdlib>
+#include <string>
 using namespace akai::capture;
 static int n=0;
 static void ck(bool ok,const char* id){++n;if(!ok){std::fprintf(stderr,"FAIL %s\n",id);std::exit(1);}}
@@ -15,11 +16,198 @@ int main(){
     ck(contains("Record Set-Up","RECORD SET-UP"),"case_insensitive");
     ck(!contains("RECORD","RECORD SET-UP"),"whole_required");
     ck(overwriteWarning("overwrite existing sample!?"),"overwrite");
+    ck(!overwriteWarning("RECORD SET-UP sample name: PULSE exists!"),
+       "real_firmware_existing_factory_waveform_setup_is_safe_to_rename");
+    ck(!overwriteWarning("RECORD MONO exists! PULSE"),
+       "existing_sample_name_is_not_overwrite_confirmation");
+    ck(overwriteWarning("RECORD MONO REPLACE EXISTING?"),
+       "true_destructive_confirmation_still_blocked");
+    ck(displayedRecordCentis("RECORD SET-UP record tim: 2.00s")==200,
+       "real_rom_2_seconds_record_time");
+    ck(displayedRecordCentis("RECORD SET-UP record tim: 123.45s")==12345,
+       "real_rom_123_45_seconds_record_time");
+    ck(displayedRecordCentis("RECORD MONO rec time: 2.00s")==0,
+       "no_fabricated_time_from_other_screen");
+    ck(displayedRecordCentis("RECORD SET-UP record tim: nonsense")==0,
+       "reject_invalid_firmware_duration");
+    ck(nativeCaptureTimeoutMs(0)==120000,
+       "default_manual_capture_old_120_second_guard");
+    ck(nativeCaptureTimeoutMs(15000)==170000,
+       "real_two_and_half_minute_wav_not_truncated_by_fixed_120s_controller");
+    ck(nativeCaptureTimeoutMs(99999)==1019990,
+       "firmware_maximum_duration_always_finite");
     ck(hasUniqueRecordName("RECORD MONO * new * STRING C5 73%F"),"real_manual_star_new");
     ck(hasUniqueRecordName("RECORD MONO - new - STRING C5 73%F"),"legacy_dash_new");
     ck(!hasUniqueRecordName("SAMPLE EDIT * new * STRING C5"),"not_outside_record");
     ck(!hasUniqueRecordName("RECORD MONO STRING C5"),"not_existing_name");
     ck(!overwriteWarning("record time: 01:22"),"ordinary_record");
+    // Cold-boot WAV import is queued until the ORIGINAL firmware is ready.
+    // The previous unconditional !firmwareReady guard immediately discarded it.
+    Controller booting;
+    ck(booting.start(0),"cold_boot_import_start");
+    Observe cold=at("RECORD SET-UP"); cold.firmwareReady=false;
+    auto bootDecision=booting.step(cold,0);
+    ck(bootDecision.command==Command::None &&
+       bootDecision.stage==Stage::WaitWav,"cold_boot_no_early_abort");
+    bootDecision=booting.step(cold,1000);
+    ck(bootDecision.command==Command::None &&
+       bootDecision.stage==Stage::WaitWav,"cold_boot_no_blind_panel_key");
+    bootDecision=booting.step(at("RECORD SET-UP"),1100);
+    ck(bootDecision.command==Command::Press &&
+       bootDecision.button==Button::RecF2,"cold_boot_resumes_real_rec");
+    Controller neverReady;
+    ck(neverReady.start(0),"cold_boot_timeout_start");
+    neverReady.step(cold,0);
+    bootDecision=neverReady.step(cold,30001);
+    ck(bootDecision.command==Command::None &&
+       bootDecision.stage==Stage::TimedOut,"cold_boot_finite_timeout");
+    Controller interrupted;
+    ck(interrupted.start(0),"firmware_loss_start");
+    interrupted.step(at("RECORD SET-UP"),0);
+    bootDecision=interrupted.step(cold,50);
+    ck(bootDecision.stage==Stage::TimedOut &&
+       bootDecision.command==Command::Release &&
+       bootDecision.button==Button::RecF2,
+       "firmware_loss_releases_owned_key");
+
+    {
+    // P023 actual ORIGINAL ROM V2.0 headless LCD regression.
+    // Owner's ROM boot was measured: at 4s "OPERATING SYSTEM 2.00",
+    // at 9-23s "waiting for hard disk ready.. SKIP". A real F8 at
+    // emulated 23.5s brought up SLCT/MIX and then SAMPLE→RECORD SET-UP.
+    ck(isOriginalStartupScreen("PROGRAMS IN MEMORY OPERATING SYSTEM 2.00"),
+       "original_startup_not_record_ready");
+    ck(hasOriginalBootSkip("waiting for hard disk ready.. SKIP"),
+       "real_rom_hdd_wait_skip_prompt");
+    ck(!hasOriginalBootSkip("WAITING FOR HARD DISK READY"),
+       "no_skip_label_no_blind_f8");
+    Controller bootCapture;
+    ck(bootCapture.start(0),"boot_hdd_capture_start");
+    auto boot=at("PROGRAMS IN MEMORY OPERATING SYSTEM 2.00");
+    auto r=bootCapture.step(boot,100);
+    ck(r.stage==Stage::WaitWav && r.command==Command::None,
+       "no_sample_during_original_rom_startup");
+    r=bootCapture.step(at("PROGRAMS IN MEMORY waiting for hard disk ready.. SKIP"),300);
+    ck(r.stage==Stage::PressBootSkip && r.command==Command::Press &&
+       r.button==Button::ArmF8,"native_f8_skip_pending_hdd");
+    r=bootCapture.step(at("waiting for hard disk ready.. SKIP"),600);
+    ck(r.command==Command::None,"boot_hardware_key_500ms");
+    r=bootCapture.step(at("waiting for hard disk ready.. SKIP"),801);
+    ck(r.command==Command::Release && r.button==Button::ArmF8 &&
+       r.stage==Stage::WaitBootReady,"release_boot_skip_on_mame_owner_thread");
+    r=bootCapture.step(at("waiting for hard disk ready.. SKIP"),1200);
+    ck(r.command==Command::None && r.stage==Stage::WaitBootReady,
+       "await_actual_native_firmware_ready");
+    r=bootCapture.step(at("waiting for hard disk ready.. SKIP"),3400);
+    ck(r.command==Command::Press && r.button==Button::ArmF8,
+       "retry_skip_only_after_firmware_timeout");
+    r=bootCapture.step(at("waiting for hard disk ready.. SKIP"),3910);
+    ck(r.command==Command::Release &&
+       r.stage==Stage::WaitBootReady,"release_boot_skip_retry");
+    r=bootCapture.step(at("PROGRAMS IN MEMORY SLCT MIX MIDI LOUD DISK DEL RNUM"),4000);
+    ck(r.command==Command::None && r.stage==Stage::WaitWav,
+       "exact_native_ready_page_after_f8");
+    r=bootCapture.step(at("PROGRAMS IN MEMORY SLCT MIX MIDI LOUD DISK DEL RNUM"),4010);
+    ck(r.command==Command::Press && r.button==Button::Sample,
+       "sample_only_after_original_hdd_boot_skip");
+    Controller noSkip;
+    ck(noSkip.start(0),"no_skip_label_start");
+    r=noSkip.step(at("WAITING FOR HARD DISK READY"),2000);
+    ck(r.command==Command::None && r.stage==Stage::WaitWav,
+       "never_guess_f8_if_original_lcd_has_no_skip");
+    ck(isRunningStage(Stage::PressBootSkip) &&
+       isRunningStage(Stage::WaitBootReady),
+       "wav_replacement_locked_during_boot_skip");
+    }
+    // Physical original-key navigation proven on owner's running V2.0:
+    // initial sample-name selection -> 4x DOWN -> RIGHT -> digits 2,2,5,
+    // then only when LCD echoes 2.25s may firmware REC be pressed.
+    Controller timeCfg;
+    ck(!timeCfg.start(0,100000),"reject_unrepresentable_native_time");
+    ck(timeCfg.start(0,225),"original_record_length_start");
+    constexpr auto setup="RECORD SET-UP sample name: PULSE exists! record tim: 1.00s";
+    auto action=timeCfg.step(at(setup),0);
+    ck(action.stage==Stage::PressTimeDown && action.command==Command::Press
+       && action.button==Button::CursorDown,"navigate_down_one");
+    for(unsigned i=0;i<4;++i){
+        const auto released=121+250*i;
+        action=timeCfg.step(at(setup),released);
+        ck(action.command==Command::Release
+           && action.button==Button::CursorDown,"time_down_release");
+        if(i<3){
+            action=timeCfg.step(at(setup),released+20);
+            ck(action.command==Command::Press
+               && action.button==Button::CursorDown,
+               "time_next_down_press");
+        }
+    }
+    ck(action.stage==Stage::PressTimeRight,"four_down_reaches_time_row");
+    action=timeCfg.step(at(setup),1000);
+    ck(action.command==Command::Press &&
+       action.button==Button::CursorRight,"time_right_into_column");
+    action=timeCfg.step(at(setup),1121);
+    ck(action.command==Command::Release && action.stage==Stage::TypeTime,
+       "time_right_release");
+    const Button digits[]={Button::Digit2,Button::Digit2,Button::Digit5};
+    for(unsigned i=0;i<3;++i){
+        const auto ms=1200+230*i;
+        action=timeCfg.step(at(setup),ms);
+        ck(action.command==Command::Press&&action.button==digits[i],
+           "record_time_integer_digits");
+        action=timeCfg.step(at(setup),ms+121);
+        ck(action.command==Command::Release,"record_time_digit_release");
+    }
+    ck(action.stage==Stage::VerifyTime,"original_firmware_time_echo_required");
+    action=timeCfg.step(at(setup),2000);
+    ck(action.command==Command::None && action.stage==Stage::VerifyTime,
+       "cannot_rec_on_stale_duration");
+    action=timeCfg.step(at("RECORD SET-UP sample name: PULSE exists! record tim: 2.25s"),2100);
+    ck(action.command==Command::Press&&action.button==Button::RecF2,
+       "native_record_time_exact_echo_allows_rec");
+    Controller wrongField;ck(wrongField.start(0,125),"mismatch_start");
+    wrongField.step(at(setup),0);
+    wrongField.step(at(setup),121);
+    wrongField.step(at(setup),141);
+    wrongField.step(at(setup),262);
+    wrongField.step(at(setup),282);
+    wrongField.step(at(setup),403);
+    wrongField.step(at(setup),423);
+    wrongField.step(at(setup),544);
+    wrongField.step(at(setup),560);
+    wrongField.step(at(setup),681);
+    for(unsigned i=0;i<3;++i){
+        wrongField.step(at(setup),800+200*i);
+        wrongField.step(at(setup),921+200*i);
+    }
+    ck(wrongField.stage()==Stage::VerifyTime,"wrong_field_waits_for_echo");
+    action=wrongField.step(at("RECORD SET-UP sample name: PULSE exists! record tim: 1.00s"),2000);
+    ck(action.command==Command::None,"wrong_time_must_not_start_recording");
+    action=wrongField.step(at(setup),9500);
+    ck(action.stage==Stage::TimedOut && !wrongField.isRunning(),
+       "wrong_time_failed_closed");
+    // A >120 s original firmware recording must remain armed past the
+    // legacy 120 s synthetic watchdog. Its STOP still needs positive Akai
+    // WADCS and native LCD feedback.
+    Controller longRecording;
+    ck(longRecording.start(0,15000),"long_recording_controller_start");
+    auto longResult=longRecording.step(
+        at("RECORD SET-UP sample name: PULSE record tim: 150.00s"),0);
+    ck(longResult.button==Button::RecF2 &&
+       longResult.stage==Stage::PressRec,"long_recording_skip_time_reentry");
+    longRecording.step(at("RECORD SET-UP"),121);
+    longRecording.step(at("RECORD MONO * new * 125000000001"),200);
+    longRecording.step(at("RECORD MONO * new * 125000000001"),330);
+    longRecording.step(at("WAITING FOR START",true,0x82),500);
+    longRecording.step(at("WAITING FOR START",true,0x82),621);
+    longResult=longRecording.step(at("RECORDING original",true,0x8a),750);
+    ck(longResult.stage==Stage::Capturing,
+       "long_sample_original_adc_dma_strobe");
+    longResult=longRecording.step(at("RECORDING original",true,0x8a),121000);
+    ck(longResult.stage==Stage::Capturing && longRecording.isRunning(),
+       "long_recording_no_false_timeout_at_121_seconds");
+    longResult=longRecording.step(at("RECORDING original",true,0x8a),171000);
+    ck(longResult.stage==Stage::TimedOut && !longRecording.isRunning(),
+       "long_recording_eventual_finite_timeout");
     Controller c;
     ck(c.start(0),"begin");
     auto r=c.step(at("RECORD SET-UP"),0);
@@ -48,8 +236,98 @@ int main(){
     r=c.step(at("RECORDING analog",true,0x8a,true),980);
     ck(r.stage==Stage::WaitStop,"wav_exhausted_wait_native_stop");
     r=c.step(at("RECORDING analog",true,0xa2,true),1150);
-    ck(r.stage==Stage::RecordedSample,"firmware_stop_seen");
-    ck(!c.isRunning(),"finished_and_stopped");
+    ck(r.stage==Stage::PressSelectSingle && r.command==Command::Press
+       && r.button==Button::SelectSingle,"firmware_stop_starts_native_keygroup_assignment");
+    ck(c.isRunning(),"recorded_but_not_yet_midi_playable");
+    r=c.step(at("RECORD MONO exists!"),1271);
+    ck(r.stage==Stage::WaitSelectSingle && r.command==Command::Release,
+       "native_single_key_release");
+    r=c.step(at("PROGRAMS IN MEMORY TEST PROGRAM SLCT MIX MIDI LOUD DISK DEL RNUM"),1300);
+    ck(r.stage==Stage::PressEditProgram && r.command==Command::Press
+       && r.button==Button::EditProgram,"single_default_test_program_selected");
+    r=c.step(at("PROGRAMS IN MEMORY TEST PROGRAM SLCT"),1421);
+    ck(r.stage==Stage::WaitEditProgram && r.command==Command::Release,
+       "native_edit_key_released");
+    r=c.step(at("PROGRAM EDIT program: TEST PROGRAM keygroups: 1"),1450);
+    ck(r.stage==Stage::PressKeygroups && r.command==Command::Press
+       && r.button==Button::KeygroupsF2,"original_f2_enters_keygroups");
+    r=c.step(at("PROGRAM EDIT"),1571);
+    ck(r.stage==Stage::WaitKeygroups && r.command==Command::Release,
+       "release_keygroups_softkey");
+    ck(originalKeygroupsPage("KEYGROUPS Keygroups in Program:   1  (+ -) active Keygroup number:  1 Edit: ONE TEST PROGRAM SMPL"),
+       "native_fixed_width_keygroups_spaces_detected");
+    ck(!originalKeygroupsPage("KEYGROUPS Keygroups in Program:  2 active Keygroup number: 1 TEST PROGRAM SMPL"),
+       "multi_keygroup_not_mistaken_for_default");
+    ck(!originalKeygroupsPage("KEYGROUPS Keygroups in Program:  1 active Keygroup number: 10 TEST PROGRAM SMPL"),
+       "keygroup_ten_not_mistaken_for_one");
+    r=c.step(at("KEYGROUPS Keygroups in Program:   1  (+ -) active Keygroup number:  1 Edit: ONE SMPL TEST PROGRAM"),1600);
+    ck(r.stage==Stage::PressSamplePage && r.command==Command::Press
+       && r.button==Button::SamplePageF6,"original_f6_enters_sample_assignment");
+    r=c.step(at("KEYGROUPS"),1721);
+    ck(r.stage==Stage::WaitSamplePage && r.command==Command::Release,
+       "release_sample_assignment_softkey");
+    std::string zoneHead="C_0-G_8 KG: 1 ED:ONE TEST PROGRAM";
+    std::string zoneLabels="zn sample V-lo V-hi pitch";
+    auto nativePage=[&](bool assigned) {
+        std::string text;
+        for(const auto& line : {zoneHead,zoneLabels,
+             std::string(assigned?"1 125000000001   0 127 TRACK Xfd":
+                                  "1 125000000001 ? 0 127 TRACK Xfd"),
+             std::string("2 ? 0 0 TRACK ON"),
+             std::string("3 ? 0 0 TRACK"),
+             std::string("4 ? 0 0 TRACK"),
+             std::string("SMP1 SMP2 SMP3"),
+             std::string("")}) {
+            auto padded=line;
+            padded.resize(40,' ');
+            text+=padded;
+        }
+        return text;
+    };
+    const auto missingZone=nativePage(false),validZone=nativePage(true);
+    ck(!originalZoneOneAssigned(missingZone,"125000000001"),
+       "native_missing_sample_question_mark_reject");
+    ck(originalZoneOneAssigned(validZone,"125000000001"),
+       "native_present_sample_name_and_no_missing_marker");
+    ck(!originalZoneOneAssigned(validZone,"125000000002"),
+       "wrong_sample_never_reused");
+    ck(!originalZoneOneAssigned("TEST PROGRAM 125000000001","125000000001"),
+       "non_40x8_fake_native_page_rejected");
+    r=c.step(at(missingZone),1750);
+    ck(r.stage==Stage::PressAssignName && r.command==Command::Press
+       && r.button==Button::Name,"original_sample_field_name_editor");
+    r=c.step(at(missingZone),1871);
+    ck(r.stage==Stage::PressAssignNumeric && r.command==Command::Release,
+       "original_sample_field_name_release");
+    r=c.step(at("LETTERS ..(NAME for numbers ENT to exit)"),1900);
+    ck(r.command==Command::Press&&r.button==Button::Name,
+       "native_zone_sample_numeric_mode");
+    r=c.step(at("NUMBERS ..(NAME for letters ENT to exit)"),2021);
+    ck(r.stage==Stage::TypeAssignName && r.command==Command::Release,
+       "native_zone_numeric_mode_release");
+    constexpr char serial[]="125000000001";
+    for(unsigned i=0;i<12;++i) {
+        const auto ms=2050+200*i;
+        r=c.step(at("NUMBERS ..(NAME for letters ENT to exit)"),ms);
+        ck(r.command==Command::Press && r.button==numericButton(serial[i]),
+           "same_generated_name_sample_and_keygroup");
+        r=c.step(at("NUMBERS ..(NAME for letters ENT to exit)"),ms+121);
+        ck(r.command==Command::Release,"native_assignment_digit_release");
+    }
+    ck(r.stage==Stage::ConfirmAssignName,"all_12_original_sample_name_digits");
+    r=c.step(at("NUMBERS ..(NAME for letters ENT to exit)"),4500);
+    ck(r.command==Command::Press && r.button==Button::Enter,
+       "commit_original_keygroup_sample_assignment");
+    r=c.step(at("NUMBERS ..(NAME for letters ENT to exit)"),4621);
+    ck(r.command==Command::Release && r.stage==Stage::WaitAssigned,
+       "release_original_keygroup_enter");
+    r=c.step(at(missingZone),4650);
+    ck(r.command==Command::None && r.stage==Stage::WaitAssigned,
+       "never_accept_nonexistent_waveform_as_midi_playable");
+    r=c.step(at(validZone),4800);
+    ck(r.stage==Stage::RecordedSample && !c.isRunning(),
+       "original_firmware_confirmed_keygroup_final_success");
+    ck(!isRunningStage(Stage::RecordedSample),"final_state_is_not_running");
     Controller nav;ck(nav.start(0),"second_start");
     r=nav.step(at("SINGLE PROGRAM MODE"),5);
     ck(r.command==Command::Press&&r.button==Button::Sample,"navigate_to_sample");
@@ -105,6 +383,69 @@ int main(){
     r=lostDuring.step(missing,850);
     ck(r.stage==Stage::SourceUnavailable && !lostDuring.isRunning(),
        "lost_source_during_record_fails_closed");
+    // P018 regression: a fresh original-firmware REC page usually has
+    // an EXISTING sample name; it must be named through panel keys instead
+    // of the old 8-second NeedNewSample timeout.
+    Controller autoNamed;ck(autoNamed.start(0),"auto_name_start");
+    r=autoNamed.step(at("RECORD SET-UP"),0);
+    ck(r.button==Button::RecF2,"auto_name_setup_to_rec");
+    r=autoNamed.step(at("RECORD SET-UP"),121);
+    ck(r.command==Command::Release,"auto_name_rec_released");
+    r=autoNamed.step(at("RECORD MONO SINE C3"),550);
+    ck(r.button==Button::Name && r.stage==Stage::PressName,
+       "auto_name_uses_original_name_button");
+    const auto letters="LETTERS ..(NAME for numbers ENT to exit)";
+    const auto numbers="NUMBERS ..(NAME for letters ENT to exit)";
+    ck(lettersEditorVisible(letters)&&!lettersEditorVisible("RECORD MONO SINE"),
+       "actual_original_rom_letters_header_required");
+    ck(numbersEditorVisible(numbers)&&!numbersEditorVisible(letters),
+       "actual_original_rom_numbers_header_required");
+    r=autoNamed.step(at(letters),680);
+    ck(r.command==Command::Release && r.button==Button::Name,
+       "auto_name_release_first_name_key");
+    r=autoNamed.step(at("RECORD MONO SINE"),690);
+    ck(r.command==Command::None,
+       "no_blind_name_toggle_on_unrelated_lcd_page");
+    r=autoNamed.step(at(letters),720);
+    ck(r.command==Command::Press && r.button==Button::Name,
+       "auto_name_toggle_numeric_mode_only_in_original_letter_editor");
+    r=autoNamed.step(at(letters),850);
+    ck(r.command==Command::Release && r.stage==Stage::TypeName,
+       "auto_name_numeric_ready");
+    for(unsigned i=0;i<12;++i){
+        auto atMs=1000+170*i;
+        if(i==0) {
+            r=autoNamed.step(at(letters),atMs);
+            ck(r.command==Command::None,
+               "no_blind_digit_on_alphabet_editor_or_unrelated_page");
+        }
+        r=autoNamed.step(at(numbers),atMs);
+        ck(r.command==Command::Press && r.button==
+            (i==0?Button::Digit1:i==1?Button::Digit2:
+             i==2?Button::Digit5:i==11?Button::Digit1:Button::Digit0),
+             "auto_name_correct_12_digit_sequence");
+        r=autoNamed.step(at(numbers),atMs+121);
+        ck(r.command==Command::Release,"auto_name_each_key_released");
+    }
+    r=autoNamed.step(at(numbers),3100);
+    ck(r.command==Command::Press && r.button==Button::Enter,
+       "auto_name_enter");
+    r=autoNamed.step(at(numbers),3230);
+    ck(r.command==Command::Release && r.stage==Stage::WaitNamed,
+       "auto_name_enter_released");
+    r=autoNamed.step(at("RECORD MONO * NEW * 125000000001"),3400);
+    ck(r.command==Command::Press && r.button==Button::ArmF8,
+       "auto_name_only_arm_after_real_firmware_unique_confirmation");
+    // Disappearing source during name entry must cancel and release keys.
+    Controller vanish;ck(vanish.start(0),"name_vanish_begin");
+    vanish.step(at("RECORD SET-UP"),0);
+    vanish.step(at("RECORD SET-UP"),121);
+    vanish.step(at("RECORD MONO SINE"),540);
+    r=vanish.step(at("NAMING",false),600);
+    ck(r.stage==Stage::SourceUnavailable && r.button==Button::Name &&
+       r.command==Command::Release,"name_source_lost_releases_button");
+    ck(isRunningStage(Stage::TypeName)&&!isRunningStage(Stage::RecordedSample),
+       "busy_stage_guard_knows_name_digits");
     Controller unknown;ck(unknown.start(0),"unknown_start");
     Observe noDisplay=at("",true);noDisplay.readable=false;
     r=unknown.step(noDisplay,100);
