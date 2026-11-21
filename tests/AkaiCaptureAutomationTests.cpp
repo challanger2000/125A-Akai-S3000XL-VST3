@@ -249,8 +249,8 @@ int main(){
         }
         return text;
     };
-    const auto missing=nativePage(false),valid=nativePage(true);
-    ck(!originalZoneOneAssigned(missing,"125000000001"),
+    const auto missingZone=nativePage(false),valid=nativePage(true);
+    ck(!originalZoneOneAssigned(missingZone,"125000000001"),
        "native_missing_sample_question_mark_reject");
     ck(originalZoneOneAssigned(valid,"125000000001"),
        "native_present_sample_name_and_no_missing_marker");
@@ -258,10 +258,10 @@ int main(){
        "wrong_sample_never_reused");
     ck(!originalZoneOneAssigned("TEST PROGRAM 125000000001","125000000001"),
        "non_40x8_fake_native_page_rejected");
-    r=c.step(at(missing),1750);
+    r=c.step(at(missingZone),1750);
     ck(r.stage==Stage::PressAssignName && r.command==Command::Press
        && r.button==Button::Name,"original_sample_field_name_editor");
-    r=c.step(at(missing),1871);
+    r=c.step(at(missingZone),1871);
     ck(r.stage==Stage::PressAssignNumeric && r.command==Command::Release,
        "original_sample_field_name_release");
     r=c.step(at("LETTERS ..(NAME for numbers ENT to exit)"),1900);
@@ -286,7 +286,7 @@ int main(){
     r=c.step(at("NUMBERS ..(NAME for letters ENT to exit)"),4621);
     ck(r.command==Command::Release && r.stage==Stage::WaitAssigned,
        "release_original_keygroup_enter");
-    r=c.step(at(missing),4650);
+    r=c.step(at(missingZone),4650);
     ck(r.command==Command::None && r.stage==Stage::WaitAssigned,
        "never_accept_nonexistent_waveform_as_midi_playable");
     r=c.step(at(valid),4800);
