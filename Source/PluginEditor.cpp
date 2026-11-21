@@ -476,96 +476,22 @@ void EnsoniqSD1AudioProcessorEditor::timerCallback()
         repaint();
     }
     
-    // An incomplete on-wire MIDI Sample Dump is NOT a portable project.
-    // Report failure once, on the UI thread only, without pretending that
-    // another sample already in MAME belongs to the just loaded DAW song.
-    if(audioProcessor.originalSdsRecallRejected.exchange(
-        false,std::memory_order_acq_rel))
+    // Retain a truthful warning for projects produced by older builds with an
+    // incomplete SDS transfer. The WAV-import feature is no longer exposed.
+    if (audioProcessor.originalSdsRecallRejected.exchange(
+        false, std::memory_order_acq_rel))
         juce::AlertWindow::showMessageBoxAsync(
             juce::AlertWindow::WarningIcon,
             "Akai project recall was rejected",
-            "This DAW project was saved while the original Akai MIDI Sample "
-            "Dump or its keygroup assignment was unfinished. It contains "
-            "no complete original sampler state. The previous instrument "
-            "state was left unchanged; import the WAV again, wait until "
-            "the Akai firmware confirms the program and save the project.");
-    bool missing = audioProcessor.isRomMissing.load(std::memory_order_acquire);
-    bool invalid = audioProcessor.isRomInvalid.load(std::memory_order_acquire);
-    bool checkFailed = audioProcessor.isSelfCheckFailed.load(std::memory_order_acquire);
-    bool unsupportedHost = audioProcessor.isUnsupportedAUHost.load(std::memory_order_acquire);
-        
-    // P030: MIDI SDS transport state is not a sample/program success receipt.
-    // The original firmware alone may confirm actual keygroup assignment.
-    const int sdsStage=audioProcessor.originalSdsStage.load(std::memory_order_acquire);
-    if(sdsStage>=1 && sdsStage<=7) {
-        if(sdsStage==1) loadMediaButton.setButtonText("SDS READY");
-        if(sdsStage==2) loadMediaButton.setButtonText("SDS SEND");
-        if(sdsStage==3) loadMediaButton.setButtonText("SDS SENT");
-        if(sdsStage==4) loadMediaButton.setButtonText("SDS ERROR");
-        if(sdsStage==5) loadMediaButton.setButtonText("SDS MAP");
-        if(sdsStage==6) loadMediaButton.setButtonText("SDS MAP OK");
-        if(sdsStage==7) loadMediaButton.setButtonText("SDS MAP FAIL");
-    }
-    // P004 display only original firmware-verified recording phases.
-    // GUI timer never advances the firmware or presses hardware controls.
-    const auto captureStage=static_cast<akai::capture::Stage>(
-        audioProcessor.autoCaptureStage.load(std::memory_order_acquire));
-    const bool captureActive=akai::capture::isRunningStage(captureStage);
-    const bool captured = captureStage==akai::capture::Stage::RecordedSample;
-    if(captureActive) {
-        if(captureStage>=akai::capture::Stage::Capturing
-           && captureStage<=akai::capture::Stage::WaitStop)
-            loadMediaButton.setButtonText("WAV REC");
-        else if(captureStage>=akai::capture::Stage::PressName
-             && captureStage<=akai::capture::Stage::WaitNamed)
-            loadMediaButton.setButtonText("WAV NAME");
-        else if(captureStage>=akai::capture::Stage::PressSelectSingle
-             && captureStage<=akai::capture::Stage::WaitAssigned)
-            loadMediaButton.setButtonText("WAV MAP");
-        else
-            loadMediaButton.setButtonText("WAV ARM");
-    } else if(captured)
-        loadMediaButton.setButtonText("WAV DONE");
-    else if(sdsStage==0)
-        loadMediaButton.setButtonText("MEDIA");
-    // One precise message per failure, never a repeated modal at 30 Hz.
-    const int statusCode=int(captureStage);
-    if (statusCode>=20 && statusCode<=28 && statusCode!=lastCaptureNotice) {
-        lastCaptureNotice=statusCode;
-        juce::String details;
-        if(captureStage==akai::capture::Stage::NeedNewSample)
-            details="The original Akai RECORD page did not confirm a unique NEW sample name "
-                    "after bounded automatic NAME/number entry attempts. "
-                    "No sample was overwritten. Check the native LCD and choose a fresh sample name.";
-        else if(captureStage==akai::capture::Stage::NoReadableLcd)
-            details="The firmware LCD could not be read reliably in text mode. "
-                    "No further automatic keys were sent. You may record the staged WAV manually "
-                    "with SAMPLE > REC > ARM > GO.";
-        else if(captureStage==akai::capture::Stage::OverwriteRisk)
-            details="The firmware indicated an existing sample/overwrite risk. "
-                    "The automation refused to confirm it.";
-        else if(captureStage==akai::capture::Stage::Busy)
-            details="A panel key was already held by the user/host. Automation stopped without "
-                    "taking control of that key.";
-        else if(captureStage==akai::capture::Stage::TimedOut)
-            details="The original Akai firmware did not confirm the expected page/state. "
-                    "Automatic recording was stopped without guessing.";
-        else if(captureStage==akai::capture::Stage::SourceUnavailable)
-            details="The WAV source was unloaded or replaced during Akai capture. "
-                    "No further recording keys were sent; discard any incomplete native sample.";
-        else if(captureStage==akai::capture::Stage::SampleTruncated)
-            details="The Akai stopped recording before the WAV finished. "
-                    "Increase the Akai REC TIME to cover the whole WAV, then import again. "
-                    "The shortened recording is NOT accepted as a complete import.";
-        else if(captureStage==akai::capture::Stage::ProgramUnassigned)
-            details="The WAV was recorded by the original Akai firmware but the "
-                    "original TEST PROGRAM's first keygroup did not confirm a valid "
-                    "sample assignment. The WAV is NOT yet MIDI-playable. "
-                    "No guessed sample-memory or program data was written.";
-        if(details.isNotEmpty())
-            juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::WarningIcon,
-                "Akai WAV recording",details);
-    }
+            "This project contains an unfinished legacy MIDI Sample Dump and "
+            "does not contain a complete original Akai sampler state. "
+            "The existing instrument state was left unchanged.");
+    const bool missing = audioProcessor.isRomMissing.load(std::memory_order_acquire);
+    const bool invalid = audioProcessor.isRomInvalid.load(std::memory_order_acquire);
+    const bool checkFailed = audioProcessor.isSelfCheckFailed.load(std::memory_order_acquire);
+    const bool unsupportedHost = audioProcessor.isUnsupportedAUHost.load(std::memory_order_acquire);
+
+    loadMediaButton.setButtonText("MEDIA");
 
     // ROM error buttons visibility
     locateRomButton.setVisible(missing);
@@ -1542,63 +1468,9 @@ void EnsoniqSD1AudioProcessorEditor::paintAnalogKnobIndicators(juce::Graphics& g
     drawOne(39, 5263.4f, juce::Colour(0xffdfdfc6));
 }
 
-bool EnsoniqSD1AudioProcessorEditor::isInterestedInFileDrag(const juce::StringArray& files)
-{
-    if (isSettingsVisible || !audioProcessor.isMameRunningFlag()) return false;
-    for (const auto& path : files)
-        if (juce::File(path).hasFileExtension(".wav")) return true;
-    return false;
-}
-void EnsoniqSD1AudioProcessorEditor::filesDropped(const juce::StringArray& files,
-                                                   int, int)
-{
-    for (const auto& path : files)
-        if (juce::File(path).hasFileExtension(".wav")) {
-            importWavFile(juce::File(path));
-            return;
-        }
-}
-void EnsoniqSD1AudioProcessorEditor::importWavFile(const juce::File& file)
-{
-    juce::String error;
-    if (!audioProcessor.stageWavForOriginalSds(file,error)) {
-        juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::WarningIcon,
-            "Akai WAV input",error);
-        return;
-    }
-    // Transfer is performed only by original Akai firmware through its
-    // authentic MIDI UART. No analog A/D or host WAV audio callbacks.
-    lastCaptureNotice = 0;
-    loadMediaButton.setButtonText("SDS: QUEUED");
-    loadMediaButton.setTooltip("WAV converted to 16-bit mono MIDI Sample Dump. "
-        "The original Akai firmware receives it over the internal MIDI port. "
-        "Program keygroup assignment is not yet validated in the VST3 host.");
-    repaint();
-}
 void EnsoniqSD1AudioProcessorEditor::loadMediaButtonClicked()
 {
     juce::PopupMenu m;
-    m.addSectionHeader("Original Akai MIDI Sample Dump");
-    m.addItem(20, "Import WAV via firmware MIDI SDS...");
-    const int sdsStage=audioProcessor.originalSdsStage.load(std::memory_order_acquire);
-    if(sdsStage==1) m.addSectionHeader("SDS sample prepared");
-    if(sdsStage==2) m.addSectionHeader("SDS transfer through original UART");
-    if(sdsStage==3) m.addSectionHeader("SDS sent - program mapping not verified");
-    if(sdsStage==4) m.addSectionHeader("SDS transfer failed");
-    if(sdsStage==5) m.addSectionHeader("Original Akai keygroup assignment in progress");
-    if(sdsStage==6) m.addSectionHeader("Original Akai LCD confirms MIDI 99 in keygroup 1");
-    if(sdsStage==7) m.addSectionHeader("Original Akai firmware did not confirm the keygroup");
-    const auto captureStage=static_cast<akai::capture::Stage>(
-        audioProcessor.autoCaptureStage.load(std::memory_order_acquire));
-    const bool captureActive=akai::capture::isRunningStage(captureStage);
-    m.addItem(22, "Resume automatic WAV recording", !captureActive &&
-        audioProcessor.wavState.load(std::memory_order_acquire)==1);
-    m.addItem(23, "Cancel automatic WAV recording", captureActive);
-    if (audioProcessor.wavState.load(std::memory_order_acquire) != 0) {
-        m.addItem(21, "Unload staged WAV");
-        m.addSectionHeader("Staged: " + audioProcessor.stagedWavName);
-    }
-    m.addSeparator();
     m.addSectionHeader("Floppy  (removable - hot swap)");
     m.addItem(2, "Insert Floppy Image (.img, .hfe, .dsk)...");
     m.addItem(4, "Eject Floppy", audioProcessor.isFloppyLoaded.load(std::memory_order_acquire));
@@ -1617,28 +1489,9 @@ void EnsoniqSD1AudioProcessorEditor::loadMediaButtonClicked()
             if (safeThis == nullptr || result == 0) return;
             auto* editor = safeThis.getComponent();
             auto& processor = editor->audioProcessor;
-            if (result == 23) {
-                processor.autoCaptureCancel.store(true,std::memory_order_release);
-                return;
-            }
-            if (result == 22) {
-                processor.autoCaptureRequest.store(true,std::memory_order_release);
-                editor->lastCaptureNotice=0;
-                return;
-            }
-            if (result == 21) {
-                processor.autoCaptureCancel.store(true,std::memory_order_release);
-                processor.clearStagedWav();
-                processor.stagedWavName.clear();
-                editor->repaint();
-                return;
-            }
-            if (result == 20 || result == 2 || result == 6 || result == 8) {
+            if (result == 2 || result == 6 || result == 8) {
                 juce::String title, filter;
-                if (result == 20) {
-                    title="Select WAV for original Akai MIDI Sample Dump";
-                    filter="*.wav;*.WAV";
-                } else if (result == 2) {
+                if (result == 2) {
                     title="Select Floppy Image";filter="*.img;*.hfe;*.dsk;*.ima;*.imd;*.td0;*.ipf";
                 } else if (result == 6) {
                     title="Select CD-ROM Image";filter="*.chd;*.cue;*.iso;*.toc;*.nrg;*.gdi";
@@ -1657,10 +1510,6 @@ void EnsoniqSD1AudioProcessorEditor::loadMediaButtonClicked()
                     auto* e=safeThis.getComponent();
                     const auto file=fc.getResult();
                     if (!file.existsAsFile()) return;
-                    if (result==20) {
-                        e->importWavFile(file);
-                        return;
-                    }
                     auto& p=e->audioProcessor;
                     p.lastMediaFolder=file.getParentDirectory().getFullPathName();
                 #ifdef _WIN32
