@@ -1,5 +1,16 @@
 # 125A Akai S3000XL VST3 — Project notes
 
+**Binding scope revision — 2026-11-21, P046:** The owner expressly
+**cancelled external WAV import**. Do not recreate a WAV file picker, WAV
+drag/drop, auto-capture from a WAV file, WAV-to-SDS converter/transfer or
+indirect WAV import, and do not treat the earlier P003–P045 experiments as
+a reason to reinstate them. These experiments are historical evidence only.
+Keep original Akai firmware/panel, native host audio input for Akai ADC,
+host MIDI, floppy/CD/SCSI media-image mounting, native project state/recall
+and private self-contained original-ROM Windows VST3 as acceptance targets.
+[Source changes and regression contract](docs/P046-EXTERNAL-WAV-IMPORT-REMOVED.md).
+
+
 ## Repository visibility and private build: deliberate separation
 **This GitHub repository is intentionally PUBLIC to minimize GitHub Actions CI costs (public-repository Actions runner billing), NOT for collaboration or source-code accessibility. Do not question or suggest changing its visibility merely because the resulting plugin is private.** The **ROM-inclusive, self-contained Windows VST3 is for private personal use only**. The proprietary firmware ROMs are deliberately absent from the repository, Git history, public releases, and public CI artifacts. These two visibility choices are not contradictory. This is a fixed project decision, not an open question.
 
@@ -17,24 +28,20 @@ This repository imports the **original upstream source and patch files unchanged
 - Verify MAME firmware boot and live LCD output with this specific ROM set before claiming that bundling works.
 - Private integration is intended solely for the user's own use; do not release/distribute a ROM-inclusive build without independently confirming rights to do so.
 
-## WAV import requirement — one-step, no external tools
-The user wants to import ordinary Windows .wav samples **directly into the running emulated Akai**, using an in-plugin file picker and/or drag-and-drop. Import must not require the user to create, manage or mount floppy/HDD images or run an external converter.
+## Cancelled external WAV import (P046)
 
-### Preferred implementation to investigate
-- Decode WAV inside the plugin (mono and stereo, common PCM and float encodings) with explicit conversion to supported native Akai S3000 sample representation, with no accidental normalization/clipping.
-- Make sample data available to the **original Akai firmware** via a safe internal virtual-media/transfer path; preserve its native program/sample management, keygroup semantics, MIDI playback and DSP. Avoid ad-hoc writes into sample RAM that bypass firmware bookkeeping.
-- Deliver one-step user UX: choose/drop a WAV -> conversion + transfer + original-OS sample registration/load -> immediately audibly usable/assignable, with clear failure feedback.
-- Compare the converted audio and resulting Akai sample metadata with known native S3000 images. Check stereo channels, loop points, sample rate, length, pitch/root note, name handling, memory limits and level accuracy.
-- Save and reopen the DAW project: imported sample bytes **and** native Akai program/mapping/selection must survive, independent of the original WAV remaining on disk. Different VST instances must not share mutable import state.
-- Prefer a fully integrated conversion module, not a separately installed program. Study `akaiutil` for format-validation reference only pending compatibility/licensing evaluation (its published license is GPLv2, while this project combines GPLv3 components).
-- This feature is **not implemented upstream**. The plugin currently accepts DAW input for original-firmware sampling and mounts Akai floppy/CD/SCSI images; those are distinct from direct WAV import.
+The user cancelled the one-step external WAV import after its failure to reach
+reliable full Windows VST3/DAW acceptance. It is **out of scope**, not an open
+P003/P004/P030/P045 task. Direct WAV file input is intentionally absent from
+the editor, public processor API and drag-and-drop targets.
 
-### UX and implementation precedent: the user's Emulator II and Emulator III projects
-This is **not a new UX concept**: follow the existing user-approved direct WAV-import workflow and standards of the user's repositories
-- https://github.com/challanger2000/125A-Emulator-II-Windows-VST3 — `docs/P001-WAV-BRIDGE.md`, `src/125a_wav_input.h`, firmware SAMPLE/SAR recording
-- https://github.com/challanger2000/125A-Emulator-III-Windows-VST3 — `source/upstream/runtime/wav_import.h`, `source/upstream/runtime/wav_firmware_import.h`, firmware-driven import
-
-The **user-facing workflow should match the Emulator II/III**: directly choose/load a WAV within the plugin and make it playable as a native sample through the original sampler firmware, with no additional externally installed utilities or manual disk image creation. Reuse the **approach and verified methods**, but adapt the implementation to **Akai S3000XL's** own ADC, disk, firmware and sample-memory architecture; do not transplant E-mu-specific device code or assume identical sampling behavior. Protect native sample formatting, stereo, memory, and project recall. Require positive S3000XL ROM-backed proof before declaring parity.
+The original Akai must still accept its native disk/media images and the
+normal host audio/MIDI signals for authentic original-firmware recording
+and playback. Do not introduce new external converters or manual disk-image
+workarounds as replacements for the cancelled feature. Historical P003/P004
+and the owner-ROM SDS investigations remain archived for provenance, not
+product release checkboxes. A project save/reopen must still retain valid
+native Akai machine state and reject malformed or incomplete legacy states.
 
 ### Repository audit flags (initial source inspection; needs actual tests)
 - The upstream code still contains legacy Ensoniq SD-1 names, OS-RAM and sequencer-RAM save/restore code, and a UI message claiming "10 specific .bin files." These are suspect for the S3000XL, which requires the main V2.0 firmware and HD61830 character ROM. Audit/remove only after checking which paths are live.
@@ -63,18 +70,17 @@ The **user-facing workflow should match the Emulator II/III**: directly choose/l
 - **NOT PASSED until full Windows job succeeds**: see
   [P005 build contract](docs/P005-WINDOWS-BUILD.md).
 
-## P004 firmware-guarded recording controller (source only)
-- Original-ROM strings and operator manual confirm SAMPLE/F2/ARM/GO workflow and a `- new -` unique-name gate. A read-only MAME LCD-text snapshot and fail-closed button state controller are now coded.
-- MEDIA-selected or dragged WAVs request firmware navigation; recording is allowed only after exact current LCD setup/new-name/WAITING screens and WADCS ARM state, with 120 ms key holds and explicit stop confirmation.
-- **Critical limitation:** live firmware may render REC pages in graphics mode; the new text snapshot must then reject automatic actions. No ROM-backed success has been demonstrated. An automatic unique name, record length, program/keygroup mapping and portable DAW recall are NOT implemented.
-- See `docs/P004-FIRMWARE-CAPTURE.md`. Do not call this a finished single-click playable WAV import, or a full VST3 build.
+## P003/P004 and P030–P045: retired external WAV-import research
 
-## P003 WAV source through original Akai ADC (implemented, not one-click yet)
-- WAV selection (MEDIA menu) and editor drag/drop implemented on `develop/v1.0.0`.
-- Supports RIFF/WAVE PCM 8/16/24/32, float32, mono/stereo, 8–192 kHz, bounded source sizes, no external conversion program. Transforms the decoded audio **off-thread** into host-rate PCM16 using a 32-tap windowed-sinc converter; no normalization or boosts.
-- Dedicated immutable two-slot feeder and original firmware `WADCS` bit-3 **GO/STOP** trigger in MAME's existing microphone source callback, preserving the original 44.1-kHz ADC/DMA sample path and applying the physical REC GAIN to WAV capture. No direct guest sample-RAM writes.
-- **Explicit user interaction remains:** original SAMPLE → REC → ARM → GO and native Akai sample/program allocation. A one-click firmware capture/program/keygroup workflow is still **NOT implemented**, and DAW portable sample recall is still **NOT implemented**.
-- See `docs/P003-WAV-ADC-IMPORT.md` and `tests/AkaiWavInputTests.cpp` for implementation boundaries and test cases. No original-ROM/Windows VST3/DAW pass is claimed.
+The previous WAV input decoder, file-to-ADC staging and original firmware
+MIDI Sample Dump controller were investigated, including original-ROM
+sample-content and recall counterexamples. **P046 removes both external-file
+entry points, WAV media menu options, the editor drag target and the
+user-triggered recording automation.** Any vestigial internal state must be
+inert and remain only to preserve safe legacy project behavior. These
+historical tests do **not** certify the current no-WAV Akai VST3 for release.
+See [P046](docs/P046-EXTERNAL-WAV-IMPORT-REMOVED.md) and historical
+[P003](docs/P003-WAV-ADC-IMPORT.md), [P004](docs/P004-FIRMWARE-CAPTURE.md).
 
 ## P002 original-firmware MON bridge (candidate, not accepted)
 - The original Akai V2.0 firmware physically controls RECORD page **MON/Moff** and auto-enables on ARM and disables after a completed recording. **Do not add an invented GUI monitor toggle.**
@@ -93,14 +99,21 @@ The **user-facing workflow should match the Emulator II/III**: directly choose/l
 - The **Mon** softkey / meter monitoring remains open and is not a physical analogue knob.
 - See `docs/P001-ANALOG-CONTROLS.md` for provenance and remaining verification.
 
-## Development order (owner priority, 2026-11-20)
-1. Implement both physically present knobs, **REC GAIN and MAIN VOLUME**, and their actual input/Main L/R audio signal effects. **P001 source written; isolated C++ checks PASS; Windows/host gates OPEN.**
-2. Complete the original firmware **Mon** function and outstanding first-stereo-record monitoring anomaly; **P002 gated source bridge implemented, firmware/DAW validation OPEN**. Keep native firmware display and behavior.
-3. Complete **one-step direct WAV import** consistent with Emulator II/III: **P003 loader/ADC feeder + P004 fail-closed firmware-button controller coded**. Actual LCD readability, unique-name/length setup, program/keygroup assignment, original-ROM proof and portable DAW sample recall remain OPEN.
-4. Reproduce a native Windows x64 VST3 build with JUCE, MAME 0.288 and VS2022; replace upstream absolute F: drive paths and integrate private ROMs outside the public Git repository.
-5. Demonstrate firmware V2.0 boot, MIDI and 10 output buses, genuine recording/playback and WAV import. Validate real 32 MiB RAM, true project/sample recall and concurrent instances.
-6. Optimize sample load speed and realtime/host reliability without changing the original Akai sound path without evidence.
-7. Treat optional EB16 effects hardware as a distinct later extension. Finish automated QA/validator/125A probes and only then the final Fender Studio Pro acceptance.
+## Development and acceptance order (revised 2026-11-21, owner P046)
+
+1. Preserve original hardware/firmware correctness, original panel, original A/D
+   and Main L/R behavior, genuine DAW MIDI, monitor and output routing.
+2. Maintain true Akai floppy/CD/SCSI image mounting and native Akai program
+   loading; no arbitrary standalone WAV import control is offered.
+3. Compile native Windows x64 VST3 with pinned MAME/JUCE/VS2022 and privately
+   embed both owner-verified original ROMs without public distribution.
+4. Prove in an actual private original-ROM Windows VST3 that boot, GUI, MIDI,
+   native sample/program handling, ten outputs, project save/reopen, automation,
+   and independent DAW instances are correct. Original-ROM Linux MAME tests
+   and ROM-free Windows host validation are necessary but insufficient.
+5. Finish automated validator/125A QA, then perform final Studio Pro acceptance.
+6. Optional EB16 effects and performance work require separate justification.
+   **External WAV file import remains cancelled and shall not block release.**
 
 ## Acceptance policy
 - No modified playback DSP without A/B tests against the original firmware/emulation reference.
@@ -121,4 +134,4 @@ The **user-facing workflow should match the Emulator II/III**: directly choose/l
 - Revision: `d4a5042dffa26fd833eafae5c0cc9d26e69ef99e`
 - License: GPLv3, see `LICENSE`
 
-**Current development status:** P001 analogue knobs, P002 candidate MON bridge, P003 direct WAV selection/ADC feeder in `develop/v1.0.0`. One-click firmware sample allocation, full Windows VST3 build, integrated ROM-backed audio and DAW acceptance remain OPEN. MON bit 5 unverified. Upstream import preserved on `main`.
+**Current development status (P046):** External WAV import intentionally removed from the active Akai development branch. Windows ROM-free build and isolated tests have passed in earlier candidates; the changed P046 revision requires its own exact-SHA CI acceptance. The native owner-ROM Windows VST3 and final Studio Pro host boot/MIDI/project-recall tests remain unaccepted. Original upstream `main` is unchanged, and historical WAV research is archived. MON bit 5 remains unverified.

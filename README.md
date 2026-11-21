@@ -8,6 +8,8 @@ The plugin boots the original firmware inside your DAW: the front panel is rende
 
 ---
 
+> **125A P046 update (2026-11-21): External WAV-file import has been removed from the active 125A Akai VST3 development branch at the owner's request.** The MEDIA menu now offers only floppy/CD/SCSI media. Original Akai panel operation, host MIDI and native audio input for the original A/D recorder remain. Historical P003/P004 experiments do not describe available file-import functionality. See [P046 scope and regression tests](docs/P046-EXTERNAL-WAV-IMPORT-REMOVED.md).
+
 ## Status
 
 Working:
@@ -37,27 +39,19 @@ Known limitations and development work (125A branch):
   See [P002 evidence and test contract](docs/P002-FIRMWARE-MONITOR.md).
 * Sample **loading** is slower than the hardware, a known cost of getting the transfer rate right.
 
-### 125A P004 – cautious original-firmware record automation
+### Historical P003/P004 WAV import experiments — retired in P046
 
-Source code on `develop/v1.0.0` now includes a MAME-owner-thread operator that
-checks the live Akai LCD text, unique sample name and WADCS recorder state
-before pressing the original SAMPLE / REC / ARM / GO buttons. The operator
-must **abort** if firmware LCD graphic mode prevents safe text recognition.
-It does not automatically set names, record length or MIDI keygroups, and
-it is **not tested against the private Akai V2.0 ROM or built as a full VST3**.
-See [P004 test contract](docs/P004-FIRMWARE-CAPTURE.md).
+The earlier 125A development branch experimented with decoding external WAVs,
+feeding the genuine Akai A/D recording path or original MIDI Sample Dump UART,
+and using firmware-controlled panel buttons to assign the resulting sample.
+**Those external-file import functions, drag-and-drop handling and their MEDIA
+menu entries have now been removed.** No built-in `.wav` loading is offered.
+The original Akai's hardware/firmware recording facilities and media-image
+mounts have not been removed.
 
-### 125A P003 – WAV input into the original Akai recorder
-
-On `develop/v1.0.0`, the MEDIA menu can select a WAV file and the panel accepts WAV drag/drop.
-Supported formats: PCM8/16/24/32 and float32, mono/stereo (8–192 kHz), with bounded sizes.
-The data is resampled off the audio thread and delivered only when the **original Akai firmware**
-starts recording (SAMPLE → REC → ARM → GO), through the original A/D and DMA chain.
-
-**Important:** This currently **prepares a waveform for native firmware capture**; it does NOT
-yet automatically create a sample/program/keygroup on one click, and it does NOT yet guarantee
-DAW project sample recall. Its source code is not a verified full Windows VST3 build.
-See [P003 evidence and limitations](docs/P003-WAV-ADC-IMPORT.md).
+Historical technical notes: [P003](docs/P003-WAV-ADC-IMPORT.md),
+[P004](docs/P004-FIRMWARE-CAPTURE.md); current scope:
+[P046](docs/P046-EXTERNAL-WAV-IMPORT-REMOVED.md).
 
 Open items and the measurements behind every decision are tracked in [`STATE.json`](STATE.json).
 
