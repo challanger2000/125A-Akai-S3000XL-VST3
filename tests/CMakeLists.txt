@@ -36,3 +36,8 @@ add_test(NAME akai_original_midi_sds_contract COMMAND akai_original_sds_tests)
 add_executable(akai_sds_assignment_tests AkaiSdsAssignmentTests.cpp)
 target_compile_features(akai_sds_assignment_tests PRIVATE cxx_std_20)
 add_test(NAME akai_original_sds_keygroup_contract COMMAND akai_sds_assignment_tests)
+
+# P035: original S3000XL ROM boot readiness and genuine F8 SKIP gate
+add_executable(akai_sds_boot_gate_tests AkaiSdsBootGateTests.cpp)
+target_compile_features(akai_sds_boot_gate_tests PRIVATE cxx_std_20)
+add_test(NAME akai_original_sds_boot_gate_contract COMMAND akai_sds_boot_gate_tests)
