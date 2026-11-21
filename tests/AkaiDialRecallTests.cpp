@@ -9,7 +9,7 @@
 
 static int checks=0;
 #define REQUIRE(e) do { ++checks; if (!(e)) { \
-    std::fprintf(stderr,"P044 dial recall contract FAIL at line %d: %s\\n",__LINE__,#e); \
+    std::fprintf(stderr,"P044 dial recall contract FAIL at line %d: %s\n",__LINE__,#e); \
     return EXIT_FAILURE; } } while(false)
 
 // This is the actual pinned MAME 0.288 s3000_state::dial_timer_tick
@@ -52,6 +52,6 @@ int main() {
     REQUIRE(originalMameWheelDelta(nativeSavedLastDial,roundTrip)==0);
     REQUIRE(originalMameWheelDelta(255,0)==-1); // wrap boundary
     REQUIRE(originalMameWheelDelta(0,1)==1);
-    std::printf("P044_AKAI_DATAENTRY_SAVED_EXTERNAL_POSITION_CONTRACT_PASS checks=%d\\n",checks);
+    std::printf("P044_AKAI_DATAENTRY_SAVED_EXTERNAL_POSITION_CONTRACT_PASS checks=%d\n",checks);
     return EXIT_SUCCESS;
 }
