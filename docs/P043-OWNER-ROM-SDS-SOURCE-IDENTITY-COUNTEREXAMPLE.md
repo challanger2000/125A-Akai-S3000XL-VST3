@@ -69,3 +69,41 @@ Further independent byte inspection of the **actual MAMESAVE v2 image** saved *a
 This is strong evidence that the original firmware/emulator **retains exact different imported source PCM in its native save state** even after MIDI-image unmount, while identical post-reload MIDI notes still play identical audio. It narrows the suspicion toward **program/keygroup → active voice/DSP sample selection or playback-state routing**, but it does **not** prove the native save-state window is specifically the DSP's live sample RAM without establishing MAME's owner/type for that serialized region. It also does not establish that the original sample was selected by the sounding MIDI part; never patch guest RAM as a workaround before tracing the actual original firmware selection.
 
 **Audit status remains original-ROM WAV source-to-audio FAIL / NO-GO**. A byte-identical copy in a native state snapshot, by itself, is not evidence of sounding audio. No private state or PCM bytes have been uploaded to GitHub.
+
+
+## P044 — diagnosis resolves the A-versus-zero counterexample: external DATA ENTRY dial restore
+
+**IMPORTANT REVISED INTERPRETATION:** The preceding A/B replay failure was real under its recorded test configuration, but subsequent original-ROM negative/positive probes have found the causative **missing physical encoder position at MAME state restore**. It is **not** evidence that original firmware SDS never played the source or that MAME cannot save source PCM. Keep earlier red hashes as the counterexample, but supersede the general “WAV import source-to-audio FAIL” diagnosis for this exact 800-frame fixture.
+
+### Original firmware A-vs-zero audition BEFORE any save/reload — real audio source fidelity PASS
+
+Starting each run from the exact same genuine Akai V2.0 ready-state, genuine MIDI SDS 60-tick packets were received, the image was unloaded, and original SINGLE/EDIT/F2/F6/DATA ENTRY panel actions assigned `MIDI 99` in TEST PROGRAM. A **different** original MIDI file with C3/E3/C4 notes was loaded **after actual keygroup assignment but in the same original firmware process**. MAME original native 48-kHz 11-channel output was captured.
+
+- Source A (800 PCM16 frames of nonzero varying audio): 1,632,001 original native output frames; within the last 10 seconds after notes, original main stereo channels 1 and 2 each yielded **197 nonzero samples** (peaks 938/946); last-10s PCM SHA-256 `4f030688f28e0d663adecbd77dc024edb65a0a7b27bac8773557cbb3db943828`.
+- Source B (800 original PCM16 **zero** samples): same 1,632,001 frames and note schedule; **no nonzero samples** anywhere within the final 10-second audition window; PCM SHA-256 `7b98d72b315480a7090a267e29ebef4deb4858ccdc1b525fa7cc4e92558b4038`.
+- The original full audio output differs between A/B. Thus **the genuine firmware's MIDI-SDS import, original keygroup assignment and source-dependent note playback were demonstrated in-process** for this short original waveform. Its short duration naturally produces fewer nonzero samples; no amplitude boost or replacement synthesizer was used.
+
+### Reproducible actual cause of broken reloaded sample mapping
+
+MAME 0.288's **real original Akai driver**, `src/mame/akai/s3000.cpp::dial_timer_tick`, compares hardware external `:DATAENTRY` port reading against an internal `m_last_dial` counter, accumulating MIDI-independent wheel rotation. The counter is saved by `s3000_state::machine_start()` via `save_item(NAME(m_last_dial))`, but the **external analogue input-port position itself is not guaranteed to be restored by the .sta**. Imported wave selection used real dial 0→1→2; the saved MAME state therefore reflects last dial **2**. On a fresh MAME process with the external dial left at default **0**, the first timer observes 2→0, synthesizes **two counterclockwise encoder ticks**, and changes the *actual original program keygroup selection* from `MIDI 99` back to **`PULSE`**. A native LCD screenshot captured just after load but **before any replay MIDI** confirmed `PULSE` and physical dial `000`. The source A PCM remains byte-exact in the native saved image, but the now-selected default program waveform rather than that source is heard. This exactly explains why the previous A/B test played identical nonzero notes.
+
+### Positive counterfactual: align the original external dial BEFORE MAMESAVE load
+
+Using precisely the same two original saved `.sta` files (no PCM, firmware, program or guest RAM patches!), the only change was:
+
+`manager.machine.ioport.ports[':DATAENTRY']:field(255):set_value(2)`
+
+**before** calling original `manager.machine:load(state)`. The input now matches the saved internal encoder position. After two completely new original Akai emulator processes independently restored A or B with the original source WAV/SDS MIDI files still unavailable, both executed the same genuine MIDI C3/E3/C4 playback:
+
+| Original saved source, external DATA ENTRY=2 before reload | Nonzero PCM (main L/R) | 48 kHz, 11-channel native original ROM output |
+| --- | ---: | --- |
+| Nonzero A | 219 / 219; peak 946 | 384,961 frames; raw PCM SHA-256 `1aadf929fd4b7b8ba9ee514e5be3cdb5b3d030589fd180b92c45a40e20d720f0` |
+| All-zero B | **0 / 0; peak 0** | 384,961 frames; raw PCM SHA-256 `0e59a4bf26d7a187b56e9d01e3b58c9f7a66bbefd59e7098ec8760f8e0e09e40` |
+
+**Actual source-driven import and native full-machine cross-process recall PASS for this one valid 800-frame original-ROM fixture when the physical dial is matched.** The *unmatched* dial counterexample remains genuine and shows why a raw MAME `.sta` alone, or LCD/hash after an incorrectly restored host input, is not a portable instrument. This experiment is still native Linux original MAME; it does **not** certify the owner's integrated Windows VST3, Studio Pro, long samples, stereo, multi-import or exhaustive state.
+
+### Required actual Windows VST3 correction (P044)
+
+The JUCE VST3 owner thread drives the physical `:DATAENTRY` input from `EnsoniqSD1AudioProcessor::dialValue`. In the existing P042 VST3, the firmware keygroup auto-assignment increments **that atomic** directly, while `APVTS.data_entry` can remain at its old default; the native MAME `.sta` saves its own internal encoder counter, but VST3 `getStateInformation` does **not** serialize the actual external encoder position explicitly. A new DAW instance can therefore reassert `data_entry=0` against saved original encoder=2, reproducing the exact native destructive -2-tick rotation.
+
+To correct, persist the exact host-facing hardware dial position in the same user project state, restore that position **before** original `immediate_load()`, and preposition the MAME external input to the restored value before native CPU/timer execution resumes. Also reconcile the serialized `APVTS.data_entry` value with the physical encoder so later normal host parameter restoration cannot silently undo the correction. Preserve valid host automation and current user gestures, and don't edit original firmware or sample PCM. Test the real Windows compiled VST3 with separate zero-vs-nonzero owner-ROM image restores and a 0/2 dial negative control before claiming P044 PASS.
