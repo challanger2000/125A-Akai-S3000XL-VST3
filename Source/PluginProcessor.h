@@ -357,7 +357,6 @@ public:
     std::string originalSdsPendingPath;
     std::uint64_t originalSdsPendingDurationMs=0;
     juce::String originalSdsLastWavName;
-    void clearStagedWav() noexcept;
     // The automation may only read the ACTUAL armed WAV asset after the
     // MAME source thread has acknowledged the new immutable input slot.
     bool wavAcceptedByEngine() const noexcept {
