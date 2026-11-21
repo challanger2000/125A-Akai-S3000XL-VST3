@@ -950,7 +950,7 @@ public:
             if(raw && raw->size()>=32
                && raw->size()<=akai::machine_state::maxSnapshot) {
                 auto dest=processor->nativeSnapshotFile();
-                if(dest.getParentDirectory().createDirectory()) {
+                if(dest.getParentDirectory().createDirectory().wasOk()) {
                     dest.deleteFile(); // no stale snapshot on failed write
                     auto stream=dest.createOutputStream();
                     if(stream && stream->openedOk()
@@ -966,8 +966,9 @@ public:
         if(seq!=processor->nativeSnapshotFinished.load(std::memory_order_acquire)) {
             auto dest=processor->nativeSnapshotFile();
             bool written=false;
-            if(dest.getParentDirectory().createDirectory()) {
-                dest.deleteFile(); // stale successful save must never count as new
+            if(dest.getParentDirectory().createDirectory().wasOk() &&
+               (!dest.existsAsFile() || dest.deleteFile())) {
+                // Only a newly written state may satisfy this request.
                 mame_machine->immediate_save(dest.getFullPathName().toStdString());
                 written=dest.existsAsFile() && dest.getSize()>=32
                     && dest.getSize()<=static_cast<juce::int64>(akai::machine_state::maxSnapshot);
