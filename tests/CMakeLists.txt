@@ -13,6 +13,9 @@ add_test(NAME akai_wav_input_contract COMMAND akai_wav_input_tests)
 add_executable(akai_capture_controller_tests AkaiCaptureAutomationTests.cpp)
 target_compile_features(akai_capture_controller_tests PRIVATE cxx_std_20)
 add_test(NAME akai_capture_controller_contract COMMAND akai_capture_controller_tests)
+add_executable(akai_wav_capture_lifecycle_tests AkaiWavCaptureStateTests.cpp)
+target_compile_features(akai_wav_capture_lifecycle_tests PRIVATE cxx_std_20)
+add_test(NAME akai_wav_capture_lifecycle_contract COMMAND akai_wav_capture_lifecycle_tests)
 
 # P012 — independent machine routing, PCM bounds and input drift cadence
 find_package(Threads REQUIRED)

@@ -520,8 +520,8 @@ void EnsoniqSD1AudioProcessorEditor::timerCallback()
             details="The original Akai firmware did not confirm the expected page/state. "
                     "Automatic recording was stopped without guessing.";
         else if(captureStage==akai::capture::Stage::SourceUnavailable)
-            details="The WAV source was unloaded or replaced before the Akai began recording. "
-                    "No further recording keys were sent.";
+            details="The WAV source was unloaded or replaced during Akai capture. "
+                    "No further recording keys were sent; discard any incomplete native sample.";
         else if(captureStage==akai::capture::Stage::SampleTruncated)
             details="The Akai stopped recording before the WAV finished. "
                     "Increase the Akai REC TIME to cover the whole WAV, then import again. "

@@ -26,6 +26,7 @@ struct Observe {
     bool readable=false;
     bool wavReady=false;
     bool wavComplete=false;
+    bool wavSourcePresent=true; // accepted engine asset, not only idle wavReady
     bool firmwareReady=false;
     bool wadcsKnown=false;
     std::uint8_t wadcs=0;
@@ -153,6 +154,7 @@ public:
                     transition(Stage::Capturing,ms);
                 break;
             case Stage::Capturing:
+                if(!o.wavSourcePresent) return finish(Stage::SourceUnavailable);
                 // The Akai's own REC TIME may be shorter than the WAV.
                 // A native WADCS STOP before the source is exhausted is
                 // a truncated sample, never a successful import.
@@ -161,6 +163,7 @@ public:
                 if(o.wavComplete)transition(Stage::WaitStop,ms);
                 break;
             case Stage::WaitStop:
+                if(!o.wavSourcePresent) return finish(Stage::SourceUnavailable);
                 if(o.wadcsKnown && (o.wadcs&0x08)==0)
                     return finish(Stage::RecordedSample);
                 break;

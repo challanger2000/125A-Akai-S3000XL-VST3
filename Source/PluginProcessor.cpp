@@ -208,9 +208,22 @@ bool EnsoniqSD1AudioProcessor::stageWavForCapture(const juce::File& file,
     }
     // Do not read/decode during playback or before engine readiness changes the
     // accepted ROM state. The staged sample is only fed on a real firmware GO.
-    if (wavPendingSlot.load(std::memory_order_acquire)!=-1
-        || wavClearPending.load(std::memory_order_acquire)) {
-        error="An earlier WAV request is still being activated.";return false;
+    const auto wavReplacementPermitted=[this]() noexcept {
+        const auto status=static_cast<akai::wav_capture::State>(
+            wavState.load(std::memory_order_acquire));
+        const int autoStage=autoCaptureStage.load(std::memory_order_acquire);
+        const bool automationActive=autoStage>=int(akai::capture::Stage::WaitWav)
+            && autoStage<=int(akai::capture::Stage::WaitStop);
+        const bool firmwareRecording=firmwareWadcsKnown.load(std::memory_order_acquire)
+            && (firmwareWadcsLatch.load(std::memory_order_acquire)&0x08)!=0;
+        return akai::wav_capture::canStage(status,firmwareRecording,automationActive,
+            wavPendingSlot.load(std::memory_order_acquire)!=-1,
+            wavClearPending.load(std::memory_order_acquire));
+    };
+    if(!wavReplacementPermitted()) {
+        error="WAV capture is in progress or a staged change is pending. "
+              "Finish or cancel the Akai recording before importing another WAV.";
+        return false;
     }
     try {
         juce::FileInputStream stream(file);
@@ -227,9 +240,10 @@ bool EnsoniqSD1AudioProcessor::stageWavForCapture(const juce::File& file,
         // Never write the slot currently used by MAME. Keep both slots alive
         // until a switch is acknowledged; no shared_ptr atomics on RT threads.
         std::lock_guard<std::mutex> lock(wavStageMutex);
-        if (wavPendingSlot.load(std::memory_order_acquire)!=-1
-            || wavClearPending.load(std::memory_order_acquire)) {
-            error="WAV activation is still pending.";return false;
+        if(!wavReplacementPermitted()) {
+            error="WAV capture began while this WAV was decoding. "
+                  "The current Akai recording was preserved.";
+            return false;
         }
         const int inactive=wavCurrentSlot.load(std::memory_order_acquire)==0?1:0;
         wavSlots[inactive]=std::move(prepared);
@@ -410,9 +424,15 @@ int EnsoniqSD1AudioProcessor::pullAudioForMame(int16_t* dest, int frames)
     const auto stop=wavStopSerial.load(std::memory_order_acquire);
     if(stop!=wavSeenStop) {
         wavSeenStop=stop;
+        // Preserve the WAV completion signal through the original STOP
+        // edge, which can occur between two LCD/controller updates.
+        const auto next=akai::wav_capture::afterFirmwareStop(
+            static_cast<akai::wav_capture::State>(
+                wavState.load(std::memory_order_acquire)),
+            wavFeed.complete(),
+            wavCurrentSlot.load(std::memory_order_acquire)>=0);
         wavFeed.stop();
-        if(wavCurrentSlot.load(std::memory_order_acquire)>=0)
-            wavState.store(1,std::memory_order_release); // can retry firmware REC
+        wavState.store(static_cast<int>(next),std::memory_order_release);
     }
     const auto go=wavGoSerial.load(std::memory_order_acquire);
     if(go!=wavSeenGo) {
@@ -1306,6 +1326,9 @@ public:
                     obs.lcd=valid?std::string_view(lcd,320):std::string_view{};
                     obs.wavReady=processor->wavAcceptedByEngine();
                     obs.wavComplete=processor->wavState.load(std::memory_order_acquire)==3;
+                    obs.wavSourcePresent=processor->wavCurrentSlot.load(
+                        std::memory_order_acquire)>=0
+                        && processor->wavState.load(std::memory_order_acquire)!=0;
                     obs.firmwareReady=processor->mameIsFullyBooted.load(
                         std::memory_order_acquire);
                     obs.wadcsKnown=processor->firmwareWadcsKnown.load(

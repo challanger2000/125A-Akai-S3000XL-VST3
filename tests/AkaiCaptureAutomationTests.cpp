@@ -93,6 +93,18 @@ int main(){
     r=shortRec.step(at("RECORD MONO",true,0xa2,false),800);
     ck(r.stage==Stage::SampleTruncated && !shortRec.isRunning(),
        "short_firmware_record_must_not_pass");
+    Controller lostDuring;ck(lostDuring.start(0),"lost_midstream_begin");
+    lostDuring.step(at("RECORD SET-UP"),0);
+    lostDuring.step(at("RECORD SET-UP"),121);
+    lostDuring.step(at("RECORD MONO * NEW *"),200);
+    lostDuring.step(at("RECORD MONO * NEW *"),330);
+    lostDuring.step(at("WAITING FOR START",true,0x82),500);
+    lostDuring.step(at("WAITING FOR START",true,0x82),621);
+    lostDuring.step(at("RECORDING",true,0x8a),750);
+    auto missing=at("RECORDING",false,0x8a);missing.wavSourcePresent=false;
+    r=lostDuring.step(missing,850);
+    ck(r.stage==Stage::SourceUnavailable && !lostDuring.isRunning(),
+       "lost_source_during_record_fails_closed");
     Controller unknown;ck(unknown.start(0),"unknown_start");
     Observe noDisplay=at("",true);noDisplay.readable=false;
     r=unknown.step(noDisplay,100);

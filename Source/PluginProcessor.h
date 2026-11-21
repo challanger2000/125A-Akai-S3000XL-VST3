@@ -40,6 +40,7 @@
 #include <mutex>
 #include <memory>
 #include "AkaiWavInput.h"
+#include "AkaiWavCaptureState.h"
 #include "AkaiCaptureAutomation.h"
 #include "AkaiInstanceAudioState.h"
 
