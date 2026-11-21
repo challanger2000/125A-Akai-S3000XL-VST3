@@ -268,7 +268,7 @@ public:
         std::vector<std::atomic<float>*> buttonParams;
 
         // --- DATA ENTRY dial (analog) state ---
-        std::atomic<int> dialValue { 128 };      // 0..255 analog position
+        std::atomic<int> dialValue { 0 };        // 0..255 external hardware input; MAME m_last_dial starts at 0
         bool dialIncPrev = false, dialDecPrev = false;
 
 #ifndef JucePlugin_PreferredChannelConfigurations
