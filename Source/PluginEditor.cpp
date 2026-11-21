@@ -1508,26 +1508,30 @@ void EnsoniqSD1AudioProcessorEditor::filesDropped(const juce::StringArray& files
 void EnsoniqSD1AudioProcessorEditor::importWavFile(const juce::File& file)
 {
     juce::String error;
-    if (!audioProcessor.stageWavForCapture(file,error)) {
+    if (!audioProcessor.stageWavForOriginalSds(file,error)) {
         juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::WarningIcon,
             "Akai WAV input",error);
         return;
     }
-    // Record via original front panel, but only after the live firmware
-    // LCD confirms each page. Failure never authorizes overwriting a sample.
-    audioProcessor.autoCaptureRequest.store(true, std::memory_order_release);
+    // Transfer is performed only by original Akai firmware through its
+    // authentic MIDI UART. No analog A/D or host WAV audio callbacks.
     lastCaptureNotice = 0;
-    loadMediaButton.setButtonText("WAV: READY");
-    loadMediaButton.setTooltip("Automatic Akai recording is starting. "
-       "No overwrite will be confirmed. Native program/keygroup assignment "
-       "and portable DAW recall are still under development.");
+    loadMediaButton.setButtonText("SDS: QUEUED");
+    loadMediaButton.setTooltip("WAV converted to 16-bit mono MIDI Sample Dump. "
+        "The original Akai firmware receives it over the internal MIDI port. "
+        "Program keygroup assignment is not yet validated in the VST3 host.");
     repaint();
 }
 void EnsoniqSD1AudioProcessorEditor::loadMediaButtonClicked()
 {
     juce::PopupMenu m;
-    m.addSectionHeader("WAV input via original Akai sampler");
-    m.addItem(20, "Import WAV with Akai firmware...");
+    m.addSectionHeader("Original Akai MIDI Sample Dump");
+    m.addItem(20, "Import WAV via firmware MIDI SDS...");
+    const int sdsStage=audioProcessor.originalSdsStage.load(std::memory_order_acquire);
+    if(sdsStage==1) m.addSectionHeader("SDS sample prepared");
+    if(sdsStage==2) m.addSectionHeader("SDS transfer through original UART");
+    if(sdsStage==3) m.addSectionHeader("SDS sent - program mapping not verified");
+    if(sdsStage==4) m.addSectionHeader("SDS transfer failed");
     const auto captureStage=static_cast<akai::capture::Stage>(
         audioProcessor.autoCaptureStage.load(std::memory_order_acquire));
     const bool captureActive=akai::capture::isRunningStage(captureStage);
@@ -1576,7 +1580,7 @@ void EnsoniqSD1AudioProcessorEditor::loadMediaButtonClicked()
             if (result == 20 || result == 2 || result == 6 || result == 8) {
                 juce::String title, filter;
                 if (result == 20) {
-                    title="Select WAV for Akai original firmware sampling";
+                    title="Select WAV for original Akai MIDI Sample Dump";
                     filter="*.wav;*.WAV";
                 } else if (result == 2) {
                     title="Select Floppy Image";filter="*.img;*.hfe;*.dsk;*.ima;*.imd;*.td0;*.ipf";
