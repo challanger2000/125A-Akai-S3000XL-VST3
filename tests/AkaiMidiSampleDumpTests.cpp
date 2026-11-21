@@ -61,9 +61,9 @@ int main(){
  };
  CHECK(std::equal(ownerHeader.begin(),ownerHeader.end(),owner.sysex.begin()));
  CHECK(owner.packets()==20 && owner.sysex.size()==2561);
- // P032: 42 ticks = 43.75ms at 480 PPQN 120BPM, safely above
- // real 127-byte MIDI UART wire time 40.64ms. Native original owner Akai
- // accepted timed-MIDI SDS, confirmed actual LCD + audible state reopen.
+ // P042: 60 ticks = 62.5ms at 480PPQN/120BPM, satisfies physical MIDI
+ // 127-byte wire time 40.64ms plus >=20ms receiver processing under the
+ // SDS non-handshaking standard; shorter gaps failed owner-ROM long WAV.
  const auto midiFile=toTimedMidiFile(owner);
  CHECK(midiFile.size()>owner.sysex.size());
  constexpr std::array<std::uint8_t,14> midiHeader={
@@ -73,13 +73,14 @@ int main(){
        && midiFile[17]=='k');
  CHECK(midiFile[22]==0 && midiFile[23]==0xff && midiFile[24]==0x51);
  CHECK(midiFile[29]==0 && midiFile[30]==0xf0 && midiFile[31]==20);
- CHECK(midiFile[52]==42 && midiFile[53]==0xf0 && midiFile[54]==126);
+ CHECK(midiFile[52]==60 && midiFile[53]==0xf0 && midiFile[54]==126);
  CHECK(midiFile.back()==0 && midiFile[midiFile.size()-4]==0);
  CHECK(midiFile[midiFile.size()-3]==0xff);
  CHECK(midiFile[midiFile.size()-2]==0x2f);
  CHECK(timedMidiTransferMillis(owner)>2000 && timedMidiTransferMillis(owner)<3000);
- // P038: 65 consecutive packets must be spaced by 42 MIDI ticks EACH.
- // The former 64-burst shape failed at 44100 frames in the original firmware.
+ // P042: 65 consecutive packets must be spaced by 60 ticks EACH.
+ // Original-V2 owner 42 ticks fails at 64000/88200 frames; 55 passes
+ // 88200 with original source deleted and real stereo bit-identical PCM.
  const auto many=encodeMono(std::vector<std::int16_t>(65*40,15000),44100,99,0);
  const auto grouped=toTimedMidiFile(many);
  std::size_t cursor=22; // standard MIDI file 14-byte header + 8-byte MTrk
@@ -99,7 +100,7 @@ int main(){
  std::size_t originalOffset=0;
  for(std::size_t p=0;p<66;++p) {
   const auto delta=readVlq();
-  CHECK(delta==(p==0?0u:42u));
+  CHECK(delta==(p==0?0u:60u));
   CHECK(grouped[cursor++]==0xf0);
   const auto length=readVlq();
   const auto bytes=std::size_t(p==0?21:127);
@@ -112,8 +113,8 @@ int main(){
  CHECK(grouped[cursor]==0 && grouped[cursor+1]==0xff
        && grouped[cursor+2]==0x2f && grouped[cursor+3]==0);
  CHECK(cursor+4==grouped.size() && originalOffset==many.sysex.size());
- CHECK(timedMidiTransferMillis(many)>4300 &&
-       timedMidiTransferMillis(many)<4600);
+ CHECK(timedMidiTransferMillis(many)>5500 &&
+       timedMidiTransferMillis(many)<6000);
  Dump broken=owner;broken.sysex.pop_back();
  CHECK(bad([&]{toTimedMidiFile(broken);}));
  std::cout<<"P030_P032_AKAI_SDS_PACKET_AND_FAST_TIMED_MIDI_WIRE=PASS\n";
