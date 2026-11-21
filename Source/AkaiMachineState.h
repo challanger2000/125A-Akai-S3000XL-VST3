@@ -84,7 +84,7 @@ public:
 private:
     std::uint32_t seq_=0;
     bool active_=false;
-}
+};
 
 // P020: one authoritative, generation-tagged owner-thread restore mailbox.
 // A previous restore may finish while a newer DAW project has arrived;
