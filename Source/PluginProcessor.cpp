@@ -74,6 +74,7 @@
 #define VST_LOG(...) do { if (VST_TRACE && mameMachine != nullptr) mameMachine->logerror(__VA_ARGS__); } while (0)
 #include "diimage.h"
 #include "imagedev/midiin.h" // P030 actual original Akai UART input-image, not RAM access
+#include "AkaiSdsAssignment.h" // P031 original LCD keygroup verification
 
 #include <iomanip>
 #include <fstream>
@@ -879,6 +880,8 @@ private:
     int captureHeldIndex = -1; // only release buttons this controller pressed
     bool originalSdsTransferActive=false; // native MAME owner only
     std::uint64_t originalSdsFinishAtMs=0;
+    akai::sds::Assignment originalSdsAssignment;
+    int originalSdsHeldIndex=-1;
     akai::machine_state::RestoreMailbox::Work nativeRestoreInFlight{}; // MAME owner only
     akai::machine_state::SnapshotBarrier nativeSnapshotInFlight{}; // MAME owner only
     
@@ -1592,7 +1595,9 @@ public:
                     if(in) {
                         const auto restored=in->load("VST MIDI");
                         processor->originalSdsStage.store(
-                            restored.first ? 4:3,std::memory_order_release);
+                            restored.first ? 4:5,std::memory_order_release);
+                        if(!restored.first)
+                            (void)originalSdsAssignment.start(now);
                     } else processor->originalSdsStage.store(
                         4,std::memory_order_release);
                 }
@@ -1625,6 +1630,70 @@ public:
                     } else processor->originalSdsStage.store(
                         4,std::memory_order_release);
                 }
+            }
+            // P031: only genuine original Akai panel keys and the live
+            // HD61830 original LCD can confirm a MIDI-imported keygroup.
+            if(originalSdsAssignment.running()) {
+                const double t=mame_machine->time().as_double();
+                const auto now=(std::isfinite(t)&&t>=0.0)
+                    ?std::uint64_t(t*1000.0):0;
+                char lcd[321]{};
+                auto* display=mame_machine->root_device()
+                    .subdevice<hd61830_device>("lcdc");
+                const bool readable=display!=nullptr &&
+                    display->snapshot_visible_text(lcd,sizeof(lcd));
+                const auto decision=originalSdsAssignment.step(
+                    readable?std::string_view(lcd,320):std::string_view{},
+                    readable,
+                    processor->mameIsFullyBooted.load(std::memory_order_acquire),
+                    now);
+                if(decision.action==akai::sds::Action::DialIncrement) {
+                    const auto prior=processor->dialValue.load(
+                        std::memory_order_relaxed)&255;
+                    // Original V2.0: two clockwise ticks select MIDI 99
+                    // from initial SINE. Real LCD echo is still mandatory.
+                    processor->dialValue.store((prior+1)&255,
+                                               std::memory_order_release);
+                } else if(decision.action==akai::sds::Action::Down) {
+                    const char* id="";
+                    switch(decision.button) {
+                    case akai::sds::Button::Single:id="btn_single";break;
+                    case akai::sds::Button::Edit:id="btn_edit";break;
+                    case akai::sds::Button::F2:id="btn_f2";break;
+                    case akai::sds::Button::F6:id="btn_f6";break;
+                    default:break;
+                    }
+                    int ix=-1;
+                    for(size_t i=0;i<processor->sd1Buttons.size();++i)
+                        if(processor->sd1Buttons[i].paramID==id) {
+                            ix=int(i);break;
+                        }
+                    if(ix>=0 && ix<int(processor->buttonParams.size()) &&
+                       processor->buttonParams[size_t(ix)] &&
+                       processor->buttonParams[size_t(ix)]->load(
+                           std::memory_order_acquire)<=0.5f) {
+                        processor->buttonParams[size_t(ix)]->store(
+                            1.f,std::memory_order_release);
+                        originalSdsHeldIndex=ix;
+                    } else {
+                        (void)originalSdsAssignment.fail();
+                        processor->originalSdsStage.store(7,
+                                                         std::memory_order_release);
+                    }
+                } else if(decision.action==akai::sds::Action::Up) {
+                    if(originalSdsHeldIndex>=0 &&
+                       originalSdsHeldIndex<int(processor->buttonParams.size())) {
+                        processor->buttonParams[size_t(originalSdsHeldIndex)]
+                            ->store(0.f,std::memory_order_release);
+                        originalSdsHeldIndex=-1;
+                    }
+                }
+                if(originalSdsAssignment.verified())
+                    processor->originalSdsStage.store(6,
+                                                     std::memory_order_release);
+                else if(originalSdsAssignment.phase()==akai::sds::Phase::Failed)
+                    processor->originalSdsStage.store(7,
+                                                     std::memory_order_release);
             }
             // ==============================================================================
             // --- 1. MOUSE INJECTION ---
