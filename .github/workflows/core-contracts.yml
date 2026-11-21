@@ -1,7 +1,7 @@
 name: 125A Akai - isolated Windows C++ contracts
 on:
   push:
-    branches: [ 'develop/**', 'feature/p017-**' ]
+    branches: [ 'develop/**', 'feature/p017-**', 'feature/p018-**' ]
     paths:
       - '.github/workflows/core-contracts.yml'
       - 'Source/AkaiAnalogControls.h'
