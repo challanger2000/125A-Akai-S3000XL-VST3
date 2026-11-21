@@ -47,6 +47,26 @@ int main(){
     ck(!mayStartSnapshot(true,false),"pending_mame_load_blocks_new_save");
     ck(!mayStartSnapshot(false,true),"inflight_original_load_blocks_save");
     ck(!mayStartSnapshot(true,true),"both_inflight_blocks_save");
+    SnapshotBarrier snap;
+    ck(!snap.begin(0,false,false)&&!snap.active(),
+       "zero_generation_must_not_start");
+    ck(!snap.begin(1,true,false)&&!snap.active(),
+       "scheduler_pending_blocks_snapshot_start");
+    ck(!snap.begin(1,false,true)&&!snap.active(),
+       "restore_pending_blocks_snapshot_start");
+    ck(snap.begin(17,false,false)&&snap.active()&&snap.sequence()==17,
+       "begin_snapshot_with_generation");
+    ck(!snap.ready(true)&&snap.active(),"deferred_save_must_not_ack_early");
+    ck(!snap.begin(18,false,false)&&snap.sequence()==17,
+       "second_generation_must_not_replace_inflight_save");
+    ck(snap.ready(false)&&snap.sequence()==17,
+       "ack_only_when_mame_saveload_cleared");
+    snap.clear();
+    ck(!snap.ready(false)&&!snap.active(),
+       "cleared_snapshot_cannot_respond_twice");
+    ck(snap.begin(18,false,false)&&snap.sequence()==18&&snap.ready(false),
+       "subsequent_generation_after_finish");
+    snap.clear();
     RestoreMailbox mb;
     auto first=std::make_shared<const std::vector<std::uint8_t>>(32,11);
     auto second=std::make_shared<const std::vector<std::uint8_t>>(32,22);

@@ -64,6 +64,27 @@ inline bool decode(std::span<const std::uint8_t> bytes,std::vector<std::uint8_t>
 inline constexpr bool mayStartSnapshot(bool mamePending, bool nativeRestoreInFlight) noexcept {
     return !mamePending && !nativeRestoreInFlight;
 }
+// MAME 0.288 immediate_save() may defer until anonymous scheduler timers
+// drain. The host may acknowledge a snapshot only when the same request's
+// pending MAME operation has resolved, not when immediate_save returned.
+class SnapshotBarrier {
+public:
+    bool begin(std::uint32_t seq, bool mamePending, bool restoreInFlight) noexcept {
+        if(active_ || seq==0 || !mayStartSnapshot(mamePending,restoreInFlight))
+            return false;
+        seq_=seq; active_=true;
+        return true;
+    }
+    bool active() const noexcept { return active_; }
+    std::uint32_t sequence() const noexcept { return seq_; }
+    bool ready(bool mamePending) const noexcept {
+        return active_ && !mamePending;
+    }
+    void clear() noexcept { active_=false; }
+private:
+    std::uint32_t seq_=0;
+    bool active_=false;
+}
 
 // P020: one authoritative, generation-tagged owner-thread restore mailbox.
 // A previous restore may finish while a newer DAW project has arrived;

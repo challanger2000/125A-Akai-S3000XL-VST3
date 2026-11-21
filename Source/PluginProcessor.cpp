@@ -799,6 +799,7 @@ private:
     akai::capture::Controller captureController; // MAME/OSD owner thread only
     int captureHeldIndex = -1; // only release buttons this controller pressed
     akai::machine_state::RestoreMailbox::Work nativeRestoreInFlight{}; // MAME owner only
+    akai::machine_state::SnapshotBarrier nativeSnapshotInFlight{}; // MAME owner only
     
     render_target* main_target = nullptr;
 
@@ -955,7 +956,8 @@ public:
             processor->nativeRestore.finish(nativeRestoreInFlight,true);
             nativeRestoreInFlight={};
         }
-        if (!nativeRestoreInFlight && !mame_machine->save_or_load_pending()) {
+        if (!nativeRestoreInFlight && !nativeSnapshotInFlight.active()
+            && !mame_machine->save_or_load_pending()) {
             if (const auto work=processor->nativeRestore.take()) {
                 bool issued=false;
                 if(work.bytes->size()>=32
@@ -985,22 +987,46 @@ public:
                 }
             }
         }
+        // Complete only the original generation after the MAME scheduler
+        // has resolved its own possibly deferred full-machine .sta SAVE.
+        auto finishSnapshot = [&]() {
+            const auto file=processor->nativeSnapshotFile();
+            bool valid=file.existsAsFile() && file.getSize()>=32
+                && file.getSize()<=static_cast<juce::int64>(akai::machine_state::maxSnapshot);
+            if(valid) {
+                juce::FileInputStream read(file);
+                char magic[8]{};
+                valid=read.openedOk() && read.read(magic,8)==8
+                    && std::memcmp(magic,"MAMESAVE",8)==0;
+            }
+            processor->nativeSnapshotSucceeded.store(valid,std::memory_order_release);
+            processor->nativeSnapshotFinished.store(nativeSnapshotInFlight.sequence(),
+                                                    std::memory_order_release);
+            nativeSnapshotInFlight.clear();
+            processor->nativeSnapshotEvent.signal();
+        };
+        if(nativeSnapshotInFlight.ready(mame_machine->save_or_load_pending()))
+            finishSnapshot();
         const auto seq=processor->nativeSnapshotRequested.load(std::memory_order_acquire);
         if(seq!=processor->nativeSnapshotFinished.load(std::memory_order_acquire)
-           && akai::machine_state::mayStartSnapshot(
-               mame_machine->save_or_load_pending(),bool(nativeRestoreInFlight))) {
-            auto dest=processor->nativeSnapshotFile();
-            bool written=false;
-            if(dest.getParentDirectory().createDirectory().wasOk() &&
-               (!dest.existsAsFile() || dest.deleteFile())) {
-                // Only a newly written state may satisfy this request.
-                mame_machine->immediate_save(dest.getFullPathName().toStdString());
-                written=dest.existsAsFile() && dest.getSize()>=32
-                    && dest.getSize()<=static_cast<juce::int64>(akai::machine_state::maxSnapshot);
+           && !nativeSnapshotInFlight.active()
+           && !processor->nativeRestore.needsService()
+           && nativeSnapshotInFlight.begin(seq,mame_machine->save_or_load_pending(),
+                                           bool(nativeRestoreInFlight))) {
+            const auto file=processor->nativeSnapshotFile();
+            if(file.getParentDirectory().createDirectory().wasOk()
+               && (!file.existsAsFile() || file.deleteFile())) {
+                // A stale file MUST NOT turn a failed deferred save green.
+                mame_machine->immediate_save(file.getFullPathName().toStdString());
+                if(nativeSnapshotInFlight.ready(mame_machine->save_or_load_pending()))
+                    finishSnapshot();
+                // Otherwise MAME has deferred the save. A later update will
+                // acknowledge only this generation after the file is written.
+            } else {
+                // Missing directory / unwritable file: deterministic failure,
+                // not a six-second host deadlock or infinite per-frame retry.
+                finishSnapshot();
             }
-            processor->nativeSnapshotSucceeded.store(written,std::memory_order_release);
-            processor->nativeSnapshotFinished.store(seq,std::memory_order_release);
-            processor->nativeSnapshotEvent.signal();
         }
 
         // --- SYNCHRONIZED MAME STATE SAVING ---
