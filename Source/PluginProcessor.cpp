@@ -3275,25 +3275,6 @@ void EnsoniqSD1AudioProcessor::getStateInformation (juce::MemoryBlock& destData)
     // 1. Save VST parameters to XML.
     auto state = apvts.copyState();
     std::unique_ptr<juce::XmlElement> xml (state.createXml());
-    // P044: the original MAME .sta contains the device's m_last_dial but
-    // NOT the host's external analog input position. An imported MIDI 99
-    // can turn back to PULSE on next restore if the two disagree.
-    const int physicalDialAtSave=dialValue.load(std::memory_order_acquire)&0xff;
-    xml->setAttribute("akai_native_dial_position",physicalDialAtSave);
-    // The original firmware's automated keygroup assignment moves the
-    // physical dial off the MAME owner thread without rewriting JUCE's
-    // data_entry parameter. Synchronize the *serialized copy*, not the
-    // live host parameter, so project automation and saved device agree.
-    for(auto* param=xml->getFirstChildElement();param!=nullptr;
-        param=param->getNextElement()) {
-        if(param->hasTagName("PARAM") &&
-           param->getStringAttribute("id")=="data_entry") {
-            param->setAttribute("value",akai::dial_recall::normalized(
-                physicalDialAtSave));
-            break;
-        }
-    }
-
     // --- 1. VERSION STAMPING ---
     xml->setAttribute("plugin_version", "1.0.0");
     
@@ -3380,6 +3361,27 @@ void EnsoniqSD1AudioProcessor::getStateInformation (juce::MemoryBlock& destData)
             // A missing snapshot must be VISIBLE to later QA. Old RAM
             // fragments are NOT a playable Akai project snapshot.
             xml->setAttribute("akai_native_complete",false);
+        }
+    }
+
+    // P044: sample the external hardware dial near the just-completed
+    // native MAME save, not at the beginning of a potentially six-second
+    // save request. The original .sta contains the internal m_last_dial,
+    // but the host-owned external analog input position needs its own
+    // portable attribute to avoid an unintended encoder tick on reload.
+    const int physicalDialAtSave=dialValue.load(std::memory_order_acquire)&0xff;
+    xml->setAttribute("akai_native_dial_position",physicalDialAtSave);
+    // Auto keygroup mapping uses the physical dial directly; its APVTS
+    // parameter might not have been notified. Update the serialized
+    // snapshot's PARAM to the same physical position without generating
+    // an additional host automation gesture during the save callback.
+    for(auto* param=xml->getFirstChildElement();param!=nullptr;
+        param=param->getNextElement()) {
+        if(param->hasTagName("PARAM") &&
+           param->getStringAttribute("id")=="data_entry") {
+            param->setAttribute("value",akai::dial_recall::normalized(
+                physicalDialAtSave));
+            break;
         }
     }
 
