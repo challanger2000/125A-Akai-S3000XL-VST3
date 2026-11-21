@@ -84,3 +84,10 @@ images or a separate executable.
 
 **Source references:** [S3000XL operator's manual](https://www.firstpr.com.au/rwi/smem/akai-manuals-2006/S3000XL.PDF)
 and this repository's `CLAUDE.md`.
+
+## P013 — Manual-correct NEW marker and non-truncating capture gate
+- Compared the actual S3000XL V2 operator manual, pp. 120–123 (PDF pp. 125–128), with the P004 controller. The firmware explicitly marks unused sample names as **`* NEW *`**, while the controller had recognized only **`- NEW -`**. The missing real-world marker could prevent every automatic ARM on a valid new sample. The controller now requires a RECORD page and permits the manual-confirmed marker, retaining the previous variant in case a firmware revision displays it.
+- While automation is preparing to press GO, loss of the accepted staged WAV now fails closed, releasing only a key held by the controller.
+- An original WADCS STOP before all WAV frames are supplied is **SampleTruncated**, never `RecordedSample`; the GUI advises that the native Akai REC TIME must cover the full file. Failures cannot masquerade as playable sample evidence.
+- Native regression exercises the manual-realistic screen, old marker, wrong page, existing names, lost asset during a held button, and early native STOP.
+- This does **not** set Akai's REC TIME or unique name automatically, prove the firmware LCD is readable in the applicable display mode, assign a Keygroup, or preserve 32 MiB sample RAM through DAW project recall. Real-ROM functional evidence remains required.

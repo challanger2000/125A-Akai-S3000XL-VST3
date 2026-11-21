@@ -15,6 +15,10 @@ int main(){
     ck(contains("Record Set-Up","RECORD SET-UP"),"case_insensitive");
     ck(!contains("RECORD","RECORD SET-UP"),"whole_required");
     ck(overwriteWarning("overwrite existing sample!?"),"overwrite");
+    ck(hasUniqueRecordName("RECORD MONO * new * STRING C5 73%F"),"real_manual_star_new");
+    ck(hasUniqueRecordName("RECORD MONO - new - STRING C5 73%F"),"legacy_dash_new");
+    ck(!hasUniqueRecordName("SAMPLE EDIT * new * STRING C5"),"not_outside_record");
+    ck(!hasUniqueRecordName("RECORD MONO STRING C5"),"not_existing_name");
     ck(!overwriteWarning("record time: 01:22"),"ordinary_record");
     Controller c;
     ck(c.start(0),"begin");
@@ -29,7 +33,7 @@ int main(){
        r.stage==Stage::WaitNewSample,"release_rec");
     r=c.step(at("RECORD TIME 01s",true),150);
     ck(r.command==Command::None,"no_arm_without_new_name");
-    r=c.step(at("sample: BASS001 - new -",true),200);
+    r=c.step(at("RECORD MONO * new * BASS001",true),200);
     ck(r.command==Command::Press&&r.button==Button::ArmF8,"arm_new_only");
     r=c.step(at("sample: BASS001 - new -"),330);
     ck(r.command==Command::Release,"release_arm");
@@ -70,6 +74,25 @@ int main(){
     ck(r.stage==Stage::Cancelled&&r.command==Command::Release&&
        r.button==Button::RecF2,"cancel_releases_only_owned_key");
     ck(!cancelled.isRunning(),"cancelled_stops");
+    // A UI-side staged WAV removal cannot be ignored before original GO.
+    Controller lost;ck(lost.start(0),"lost_begin");
+    r=lost.step(at("RECORD SET-UP"),0);
+    ck(r.command==Command::Press,"lost_press_rec");
+    r=lost.step(at("RECORD SET-UP",false),50);
+    ck(r.stage==Stage::SourceUnavailable && r.command==Command::Release &&
+       r.button==Button::RecF2,"source_disappears_releases_held_rec_key");
+    Controller shortRec;ck(shortRec.start(0),"short_record_begin");
+    shortRec.step(at("RECORD SET-UP"),0);
+    shortRec.step(at("RECORD SET-UP"),121);
+    shortRec.step(at("RECORD MONO * new * BASS001"),200);
+    shortRec.step(at("RECORD MONO * new * BASS001"),330);
+    shortRec.step(at("WAITING FOR START",true,0x82),500);
+    shortRec.step(at("WAITING FOR START",true,0x82),621);
+    r=shortRec.step(at("RECORDING analog",true,0x8a),750);
+    ck(r.stage==Stage::Capturing,"short_record_detect_native_go");
+    r=shortRec.step(at("RECORD MONO",true,0xa2,false),800);
+    ck(r.stage==Stage::SampleTruncated && !shortRec.isRunning(),
+       "short_firmware_record_must_not_pass");
     Controller unknown;ck(unknown.start(0),"unknown_start");
     Observe noDisplay=at("",true);noDisplay.readable=false;
     r=unknown.step(noDisplay,100);

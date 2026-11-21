@@ -17,7 +17,8 @@ enum class Stage: int {
     PressGo=8, WaitRecording=9, Capturing=10,
     WaitStop=11, RecordedSample=12,
     NeedNewSample=20, NoReadableLcd=21, OverwriteRisk=22,
-    TimedOut=23, Busy=24, Cancelled=25
+    TimedOut=23, Busy=24, Cancelled=25,
+    SourceUnavailable=26, SampleTruncated=27
 };
 struct Observe {
     // Exactly the CURRENT displayed LCD text, never stale unmapped RAM.
@@ -47,6 +48,13 @@ constexpr bool contains(std::string_view text,std::string_view wanted) noexcept 
         if(match)return true;
     }
     return false;
+}
+// S3000XL V2 operator manual p.121: a unique name is marked "* NEW *"
+// on the RECORD page. The preexisting candidate "- NEW -" is retained
+// for compatibility but is never accepted outside an actual RECORD page.
+inline bool hasUniqueRecordName(std::string_view lcd) noexcept {
+    return contains(lcd,"RECORD") &&
+        (contains(lcd,"* NEW *") || contains(lcd,"- NEW -"));
 }
 inline bool overwriteWarning(std::string_view text) noexcept {
     return contains(text,"OVERWRITE") || contains(text,"EXISTS!")
@@ -79,6 +87,13 @@ public:
         if(!o.firmwareReady)return finish(Stage::TimedOut);
         if (o.readable && overwriteWarning(o.lcd))
             return finish(Stage::OverwriteRisk);
+        // Before GO, a replaced/unloaded WAV must abort; never record
+        // silence just because the UI still displays an old filename.
+        if ((stage_==Stage::PressSample || stage_==Stage::WaitSetup ||
+             stage_==Stage::PressRec || stage_==Stage::WaitNewSample ||
+             stage_==Stage::PressArm || stage_==Stage::WaitArmed) &&
+             !o.wavReady)
+            return finish(Stage::SourceUnavailable);
         if(ms>=enteredMs_ && ms-enteredMs_>timeoutForStage())
             return finish(stage_==Stage::WaitNewSample?Stage::NeedNewSample
                         :(!o.readable && (stage_==Stage::WaitSetup ||
@@ -118,7 +133,7 @@ public:
                 }
                 break;
             case Stage::WaitNewSample:
-                if(o.readable && contains(o.lcd,"- NEW -")) {
+                if(o.readable && hasUniqueRecordName(o.lcd)) {
                     // Firmware explicitly says this name does not already exist.
                     transition(Stage::PressArm,ms);
                     return press(Button::ArmF8,ms);
@@ -138,6 +153,11 @@ public:
                     transition(Stage::Capturing,ms);
                 break;
             case Stage::Capturing:
+                // The Akai's own REC TIME may be shorter than the WAV.
+                // A native WADCS STOP before the source is exhausted is
+                // a truncated sample, never a successful import.
+                if(o.wadcsKnown && (o.wadcs&0x08)==0 && !o.wavComplete)
+                    return finish(Stage::SampleTruncated);
                 if(o.wavComplete)transition(Stage::WaitStop,ms);
                 break;
             case Stage::WaitStop:
