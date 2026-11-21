@@ -56,3 +56,16 @@ To challenge the possibility that the earlier saved `.sta` only sounded like the
 ## Exact Windows baseline verified independently, but not a source-content oracle
 
 Full **ROM-free** Windows x64 MAME 0.288 + JUCE 8.0.12 VST3 build at exact production source commit `894338ba38a363b6903278b51bac52fd9fb45c87` passed [Windows Actions #44941367658](https://github.com/challanger2000/125A-Akai-S3000XL-VST3/actions/runs/44941367658). Installed QA reports show official Steinberg **47 tests passed / 0 failed** and pinned 125A Tester v0.3.2 **55 PASS / 0 WARNING / 0 FAIL**, including its ROM-free host lifecycle and state probes. ROM-free tests had **zero genuine original-ROM sound**; therefore neither test covers an SDS-imported WAV sound nor a fresh Windows owner-VST3 DAW save/reload. Proprietary original-ROM tests above ran only as separate private Linux MAME experiments from an earlier pinned ROM-free emulator binary, **not** the final Windows VST3.
+
+
+## Follow-up source-byte localization: imported PCM survives in original native state
+
+Further independent byte inspection of the **actual MAMESAVE v2 image** saved *after the SDS image was unloaded* supplies a useful localization clue. Remove MAME's 32-byte save header, decompress the native zlib payload (37,212,493 bytes) from each full owner-ROM state, and inspect the same offset in both images:
+
+- **Native original-state uncompressed offset 298,948:** all **1,600 consecutive bytes** in the nonzero-A state are **byte-identical** to the 800-frame original WAV's little-endian PCM16 data. A raw byte search finds that exact 20-byte leading PCM signature at this offset.
+- At **the same state offset**, the all-zero-B state has **1,600 bytes of zero**, exactly matching the independent silent WAV's PCM16 data.
+- Across the full two uncompressed states, **1,810 bytes** differ: 1,550 in MiB index 0 and 260 in MiB index 32. **1,548** of the differences lie within the 1,600-byte PCM window; the other two bytes in that window are already equal in both inputs.
+
+This is strong evidence that the original firmware/emulator **retains exact different imported source PCM in its native save state** even after MIDI-image unmount, while identical post-reload MIDI notes still play identical audio. It narrows the suspicion toward **program/keygroup → active voice/DSP sample selection or playback-state routing**, but it does **not** prove the native save-state window is specifically the DSP's live sample RAM without establishing MAME's owner/type for that serialized region. It also does not establish that the original sample was selected by the sounding MIDI part; never patch guest RAM as a workaround before tracing the actual original firmware selection.
+
+**Audit status remains original-ROM WAV source-to-audio FAIL / NO-GO**. A byte-identical copy in a native state snapshot, by itself, is not evidence of sounding audio. No private state or PCM bytes have been uploaded to GitHub.
