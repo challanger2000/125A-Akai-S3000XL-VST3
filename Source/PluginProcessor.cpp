@@ -1326,9 +1326,7 @@ public:
                     obs.lcd=valid?std::string_view(lcd,320):std::string_view{};
                     obs.wavReady=processor->wavAcceptedByEngine();
                     obs.wavComplete=processor->wavState.load(std::memory_order_acquire)==3;
-                    obs.wavSourcePresent=processor->wavCurrentSlot.load(
-                        std::memory_order_acquire)>=0
-                        && processor->wavState.load(std::memory_order_acquire)!=0;
+                    obs.wavSourcePresent=processor->wavSourcePresent();
                     obs.firmwareReady=processor->mameIsFullyBooted.load(
                         std::memory_order_acquire);
                     obs.wadcsKnown=processor->firmwareWadcsKnown.load(
