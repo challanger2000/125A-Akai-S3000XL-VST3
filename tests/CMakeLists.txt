@@ -31,3 +31,8 @@ add_test(NAME akai_instance_audio_state_contract COMMAND akai_instance_audio_sta
 add_executable(akai_original_sds_tests AkaiMidiSampleDumpTests.cpp)
 target_compile_features(akai_original_sds_tests PRIVATE cxx_std_20)
 add_test(NAME akai_original_midi_sds_contract COMMAND akai_original_sds_tests)
+
+# P031: fail-closed original firmware LCD and hardware encoder assignment
+add_executable(akai_sds_assignment_tests AkaiSdsAssignmentTests.cpp)
+target_compile_features(akai_sds_assignment_tests PRIVATE cxx_std_20)
+add_test(NAME akai_original_sds_keygroup_contract COMMAND akai_sds_assignment_tests)
