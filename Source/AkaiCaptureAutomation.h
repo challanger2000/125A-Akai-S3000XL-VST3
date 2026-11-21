@@ -62,6 +62,16 @@ inline bool hasUniqueRecordName(std::string_view lcd) noexcept {
     return contains(lcd,"RECORD") &&
         (contains(lcd,"* NEW *") || contains(lcd,"- NEW -"));
 }
+// These two text-mode headers are present in the owner's ORIGINAL V2.0
+// firmware; never type into a generic readable LCD page. In particular,
+// receiving an unrelated RECORD page while waiting for NAME must not make
+// numeric keys modify unrelated native sampler parameters.
+inline bool lettersEditorVisible(std::string_view lcd) noexcept {
+    return contains(lcd,"LETTERS") && contains(lcd,"NAME FOR NUMBERS");
+}
+inline bool numbersEditorVisible(std::string_view lcd) noexcept {
+    return contains(lcd,"NUMBERS") && contains(lcd,"NAME FOR LETTERS");
+}
 inline bool overwriteWarning(std::string_view text) noexcept {
     return contains(text,"OVERWRITE") || contains(text,"EXISTS!")
         || contains(text,"REPLACE EXISTING") || contains(text,"DELETE");
@@ -179,13 +189,16 @@ public:
                 }
                 break;
             case Stage::PressNumericMode:
-                if(o.readable)return press(Button::Name,ms);
+                if(o.readable && lettersEditorVisible(o.lcd))
+                    return press(Button::Name,ms);
                 break;
             case Stage::TypeName:
-                if(o.readable)return press(numericButton(generatedDigit(nameIndex_)),ms);
+                if(o.readable && numbersEditorVisible(o.lcd))
+                    return press(numericButton(generatedDigit(nameIndex_)),ms);
                 break;
             case Stage::ConfirmName:
-                if(o.readable)return press(Button::Enter,ms);
+                if(o.readable && numbersEditorVisible(o.lcd))
+                    return press(Button::Enter,ms);
                 break;
             case Stage::WaitNamed:
                 if(o.readable && hasUniqueRecordName(o.lcd)) {

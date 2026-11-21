@@ -116,29 +116,43 @@ int main(){
     r=autoNamed.step(at("RECORD MONO SINE C3"),550);
     ck(r.button==Button::Name && r.stage==Stage::PressName,
        "auto_name_uses_original_name_button");
-    r=autoNamed.step(at("NAME SAMPLE"),680);
+    const auto letters="LETTERS ..(NAME for numbers ENT to exit)";
+    const auto numbers="NUMBERS ..(NAME for letters ENT to exit)";
+    ck(lettersEditorVisible(letters)&&!lettersEditorVisible("RECORD MONO SINE"),
+       "actual_original_rom_letters_header_required");
+    ck(numbersEditorVisible(numbers)&&!numbersEditorVisible(letters),
+       "actual_original_rom_numbers_header_required");
+    r=autoNamed.step(at(letters),680);
     ck(r.command==Command::Release && r.button==Button::Name,
        "auto_name_release_first_name_key");
-    r=autoNamed.step(at("NAME SAMPLE"),690);
+    r=autoNamed.step(at("RECORD MONO SINE"),690);
+    ck(r.command==Command::None,
+       "no_blind_name_toggle_on_unrelated_lcd_page");
+    r=autoNamed.step(at(letters),720);
     ck(r.command==Command::Press && r.button==Button::Name,
-       "auto_name_toggle_numeric_mode");
-    r=autoNamed.step(at("NAME SAMPLE"),820);
+       "auto_name_toggle_numeric_mode_only_in_original_letter_editor");
+    r=autoNamed.step(at(letters),850);
     ck(r.command==Command::Release && r.stage==Stage::TypeName,
        "auto_name_numeric_ready");
     for(unsigned i=0;i<12;++i){
         auto atMs=1000+170*i;
-        r=autoNamed.step(at("NAMING"),atMs);
+        if(i==0) {
+            r=autoNamed.step(at(letters),atMs);
+            ck(r.command==Command::None,
+               "no_blind_digit_on_alphabet_editor_or_unrelated_page");
+        }
+        r=autoNamed.step(at(numbers),atMs);
         ck(r.command==Command::Press && r.button==
             (i==0?Button::Digit1:i==1?Button::Digit2:
              i==2?Button::Digit5:i==11?Button::Digit1:Button::Digit0),
              "auto_name_correct_12_digit_sequence");
-        r=autoNamed.step(at("NAMING"),atMs+121);
+        r=autoNamed.step(at(numbers),atMs+121);
         ck(r.command==Command::Release,"auto_name_each_key_released");
     }
-    r=autoNamed.step(at("NAMING"),3100);
+    r=autoNamed.step(at(numbers),3100);
     ck(r.command==Command::Press && r.button==Button::Enter,
        "auto_name_enter");
-    r=autoNamed.step(at("NAMING"),3230);
+    r=autoNamed.step(at(numbers),3230);
     ck(r.command==Command::Release && r.stage==Stage::WaitNamed,
        "auto_name_enter_released");
     r=autoNamed.step(at("RECORD MONO * NEW * 125000000001"),3400);
