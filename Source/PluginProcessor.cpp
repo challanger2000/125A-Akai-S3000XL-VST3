@@ -77,6 +77,7 @@
 #include "AkaiSdsAssignment.h" // P031 original LCD keygroup verification
 #include "AkaiSdsBootGate.h" // P035 original firmware boot before MIDI SDS
 #include "AkaiSdsStateGuard.h" // P036 no DAW recall snapshot mid SDS
+#include "AkaiDialRecall.h" // P044 original MAME external rotary input on state recall
 #include "AkaiMidiPortGuard.h" // P042 missing .mid must not become fake MIDI port
 
 #include <iomanip>
@@ -1064,6 +1065,26 @@ public:
                             && stream->write(work.bytes->data(),work.bytes->size())) {
                             stream->flush();
                             stream.reset();
+                            // P044: original MAME saves the INTERNAL Akai
+                            // m_last_dial (the firmware's endless rotary
+                            // encoder reference), but its external analog
+                            // DATAENTRY input is host-owned. Before loading
+                            // the original .sta, preposition that external
+                            // input to the matching project value. Otherwise
+                            // the next original 60-Hz dial tick interprets
+                            // the fresh host's default 0 as an intentional
+                            // backward turn from saved 2 and swaps MIDI 99
+                            // back to PULSE (owner original-ROM A/B proof).
+                            if (auto* dport=mame_machine->root_device()
+                                    .ioport(":DATAENTRY")) {
+                                if (auto* dfield=dport->field(0xff)) {
+                                    if (dfield->live().analog) {
+                                        const int savedExternal=processor->dialValue
+                                            .load(std::memory_order_acquire) & 0xff;
+                                        dfield->live().analog->set_value(savedExternal);
+                                    }
+                                }
+                            }
                             mame_machine->immediate_load(
                                 dest.getFullPathName().toStdString());
                             issued=true;
@@ -2071,8 +2092,12 @@ void EnsoniqSD1AudioProcessor::parameterChanged(const juce::String& parameterID,
                 pushMidiByte(val, targetMameTime);
             }
             else if (parameterID == "data_entry") {
-                // DAW "Data Entry" slider (0..1) -> S3000XL data-entry dial (0..255).
-                dialValue.store(((int)(newValue * 255.0f)) & 0xFF, std::memory_order_relaxed);
+                // P044: use exact nearest-step quantization, not truncation;
+                // 2/255 must restore physical position 2, not 1.
+                // Reject malformed automation without fabricating a turn.
+                int decoded=0;
+                if (akai::dial_recall::decodeNormalized(newValue,decoded))
+                    dialValue.store(decoded,std::memory_order_release);
             }
         }
 }
