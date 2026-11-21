@@ -26,3 +26,8 @@ add_executable(akai_instance_audio_state_tests AkaiInstanceAudioStateTests.cpp)
 target_compile_features(akai_instance_audio_state_tests PRIVATE cxx_std_20)
 target_link_libraries(akai_instance_audio_state_tests PRIVATE Threads::Threads)
 add_test(NAME akai_instance_audio_state_contract COMMAND akai_instance_audio_state_tests)
+
+# P030: original Akai S3000XL firmware standard MIDI SDS wire encoding
+add_executable(akai_original_sds_tests AkaiMidiSampleDumpTests.cpp)
+target_compile_features(akai_original_sds_tests PRIVATE cxx_std_20)
+add_test(NAME akai_original_midi_sds_contract COMMAND akai_original_sds_tests)
