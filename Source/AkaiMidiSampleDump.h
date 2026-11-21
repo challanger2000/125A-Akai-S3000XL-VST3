@@ -65,16 +65,17 @@ inline Dump encodeMono(std::span<const std::int16_t> mono,std::uint32_t rate,
 }
 // P032: Convert one authentic SDS dump into a Standard MIDI File.
 // MAME's native .syx parser inserts 100ms silence after each SysEx packet.
-// P038 owner-V2.0-ROM measured LENGTH ADVERSARIAL CONTRACT:
-// 64 packets in one MIDI event work for short samples (800..41241 frames),
-// but a genuine one-second / 44100-frame SDS stream then leaves the original
-// TEST PROGRAM keygroup at SINE even though firmware displays 'MIDI 99'.
-// Giving EVERY 127-byte packet 42 MIDI ticks (43.75ms at 120 BPM/480PPQN)
-// is only 3.11ms longer than its physical 31250bps 40.64ms serial time.
-// ORIGINAL 44100-frame owner-ROM test with this pacing: MIDI 99 selectable
-// in zone 1 after real SINGLE/EDIT/F2/F6 and DATAENTRY operations. This is
-// positive original firmware evidence, not a synthetic encoder assumption.
-// Prefer RELIABILITY to batching. Do not re-introduce 64-packet bursts.
+// P042 owner-ROM original Akai MIDI SDS reliability and protocol:
+// 64-packet bursts fail 44100 frames; individual 42-tick (43.75ms)
+// packets play back 44100 but FAIL at 64000 and 88200 original firmware.
+// Original V2.0 at 55 ticks (57.29ms) DOES play 88200 frames and restores
+// authentic original PCM bit-identically from independent owner .sta loads.
+// MIDI SDS no-handshake standard requires allowing >=20ms after a packet
+// for receiver checking. With 127 bytes at 31250baud/10 bits per byte,
+// physical wire time is 40.64ms + >=20ms; so use 60 ticks = 62.5ms,
+// 21.86ms post-packet receiver processing allowance. No shortcuts or
+// sample RAM injection; the original Akai firmware still allocates PCM.
+// Do NOT reduce to 42 ticks based only on 44100-frame passing.
 inline std::vector<std::uint8_t> toTimedMidiFile(const Dump& dump) {
  const auto expected=21u+127u*dump.packets();
  if(dump.frames==0 || dump.sysex.size()!=expected)
@@ -97,10 +98,12 @@ inline std::vector<std::uint8_t> toTimedMidiFile(const Dump& dump) {
   if(offset+bytes>dump.sysex.size() ||
      dump.sysex[offset]!=0xf0 || dump.sysex[offset+bytes-1]!=0xf7)
    throw std::invalid_argument("Malformed original Akai SDS SysEx boundary");
-  // P038: header at t=0; EVERY MIDI SDS packet starts after 42 ticks.
-  // 42 ticks = 43.75ms; each 127-byte packet needs 40.64ms UART time.
-  // Firmware processes packets without dropping sample finalization at 1s.
-  const auto ticks=i==0?0u:42u;
+  // P042: header at t=0; each data packet follows after 60 ticks.
+  // 60 ticks at 480PPQN/120BPM = 62.5ms.
+  // 127 bytes need 40.64ms physical UART plus >=20ms SDS receiver
+  // checksum/memory processing. 55 ticks passed genuine 2s owner ROM;
+  // 60 is the next conservative protocol-compliant integer tick step.
+  const auto ticks=i==0?0u:60u;
   length(ticks); // original MIDI file tick delta (480 PPQN)
   append(0xf0);
   length(std::uint32_t(bytes-1)); // includes trailing F7 per SMF SysEx
@@ -121,13 +124,13 @@ inline std::vector<std::uint8_t> toTimedMidiFile(const Dump& dump) {
  return out;
 }
 inline std::uint64_t timedMidiTransferMillis(const Dump& dump)noexcept {
- // Each MIDI packet starts 42 ticks after the previous event (500000us/QN,
- // 480 ticks/QN). Original UART then needs 40.64ms for the final 127 bytes.
- // 1500ms conservatively covers original OS sample finalization / scheduler
- // latency. This timestamp is NOT proof of genuine firmware keygroup mapping.
+ // Each original SDS packet follows the last after 60 SMF MIDI ticks,
+ // 480 PPQN at 120 BPM: 62.5ms start gap including true 40.64ms UART
+ // physical wire time. Additional 1500ms for final original OS processing.
+ // This timestamp is never firmware keygroup success proof.
  const auto count=std::uint64_t(dump.packets());
  if(!count)return 0;
- const auto midiTicks=count*42u;
+ const auto midiTicks=count*60u;
  const auto beforeLast=(midiTicks*500u+479u)/480u;
  constexpr std::uint64_t lastPacketWireMs=41u;
  return beforeLast+lastPacketWireMs+1500u;
