@@ -342,6 +342,12 @@ public:
             && wavCurrentSlot.load(std::memory_order_acquire)>=0
             && wavPendingSlot.load(std::memory_order_acquire)==-1;
     }
+    // The native MAME owner (VstOsdInterface) may observe this public,
+    // read-only accessor; the two-slot implementation stays private.
+    bool wavSourcePresent() const noexcept {
+        return wavCurrentSlot.load(std::memory_order_acquire)>=0
+            && wavState.load(std::memory_order_acquire)!=0;
+    }
     // Message thread posts one-shot requests; emulation owner thread executes.
     std::atomic<bool> autoCaptureRequest{false};
     std::atomic<bool> autoCaptureCancel{false};
