@@ -29,3 +29,17 @@ A deliberately truncated `.sta` (97 trailing bytes removed), loaded directly thr
 
 ## Next evidence boundary
 Build the exact P020 original Windows x64 VST3; privately seal both verified original ROMs into the resulting ROM-free PE via the existing offline overlay packer; use a real Windows VST3 host/DAW to record a WAV with the original firmware, assign a keygroup, trigger C3, save/close/reopen, remove the original WAV path and compare PCM and sample/program memory. Do not call FINAL until that chain, native host QA, and GUI/runtime gates pass.
+
+## Stronger firmware boot evidence (separate screen capture)
+At approximately 4.0 emulated seconds, the same original-ROM, original-CPU
+headless MAME instance successfully produced a **native 1034 x 185 PNG**
+using Lua `manager.machine.screens[':screen']:snapshot(absolute_path)`.
+The rendered physical panel's *live* LCD contains the original firmware lines
+`OPERATING SYSTEM 2.00`, `16 Mwords fitted`, and a
+`PROGRAMS IN MEMORY` screen with `1 TEST PROGRAM`.
+This positively proves that the V2.0 firmware reached its running panel and
+discovered **16 million 16-bit sample words (32 MiB)**, rather than merely
+executing a few CPU cycles without ROM errors. The image was examined privately
+and was **not** uploaded with this public documentation. This does not show a
+loaded user WAV or sound output. The SDL_ttf symbol shim was not used to render
+the emulated LCD; MAME's native screen framebuffer generated this capture.
