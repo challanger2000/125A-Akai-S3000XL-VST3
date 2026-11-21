@@ -178,6 +178,47 @@ int main(){
     action=wrongField.step(at(setup),9500);
     ck(action.stage==Stage::TimedOut && !wrongField.isRunning(),
        "wrong_time_failed_closed");
+
+    // Five keypad digits and a long original sample are supported: owner
+    // firmware V2.0 measured "record tim:123.45s" after 1,2,3,4,5.
+    Controller longTime;
+    ck(longTime.start(0,12345),"long_native_duration_start");
+    auto longAction=longTime.step(at(setup),0);
+    ck(longAction.button==Button::CursorDown,"long_time_first_down");
+    for(unsigned i=0;i<4;++i) {
+        longAction=longTime.step(at(setup),121+250*i);
+        if(i<3)longAction=longTime.step(at(setup),141+250*i);
+    }
+    ck(longTime.stage()==Stage::PressTimeRight,
+       "long_time_four_down");
+    longTime.step(at(setup),1000);
+    longTime.step(at(setup),1121);
+    constexpr Button longDigits[]={Button::Digit1,Button::Digit2,
+                                   Button::Digit3,Button::Digit4,Button::Digit5};
+    for(unsigned i=0;i<5;++i) {
+        const auto atMs=1200+200*i;
+        longAction=longTime.step(at(setup),atMs);
+        ck(longAction.command==Command::Press &&
+           longAction.button==longDigits[i],"exact_original_five_digit_time");
+        longAction=longTime.step(at(setup),atMs+121);
+        ck(longAction.command==Command::Release,
+           "exact_original_five_digit_release");
+    }
+    ck(longTime.stage()==Stage::VerifyTime,"long_duration_reaches_native_echo");
+    longAction=longTime.step(at("RECORD SET-UP sample name: PULSE exists! record tim: 23.45s"),2400);
+    ck(longAction.command==Command::None,
+       "reject_truncated_display_for_123_45_seconds");
+    longAction=longTime.step(at("RECORD SET-UP sample name: PULSE exists! record tim: 123.45s"),2600);
+    ck(longAction.command==Command::Press && longAction.button==Button::RecF2,
+       "original_long_duration_123_45_echo_validated");
+    // A real factory waveform on SET-UP must not trigger a false destructive
+    // overwrite: the name controller will later ask for a genuine "- new -".
+    Controller existingSetup;
+    ck(existingSetup.start(0),"existing_factory_waveform_start");
+    auto existingAction=existingSetup.step(at(setup),0);
+    ck(existingAction.command==Command::Press &&
+       existingAction.button==Button::RecF2,
+       "existing_factory_waveform_is_not_auto_abort");
     Controller c;
     ck(c.start(0),"begin");
     auto r=c.step(at("RECORD SET-UP"),0);
