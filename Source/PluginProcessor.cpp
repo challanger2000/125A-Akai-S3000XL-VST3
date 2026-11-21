@@ -208,7 +208,7 @@ void EnsoniqSD1AudioProcessor::pushAudioToMame(const juce::AudioBuffer<float>& b
 // panel recording, ordinary host MIDI and disk-image mounting are unchanged.
 // Legacy native machine-state and import-failure recall guards are retained.
 //
-// int EnsoniqSD1AudioProcessor::pullAudioForMame(int16_t* dest, int frames)
+int EnsoniqSD1AudioProcessor::pullAudioForMame(int16_t* dest, int frames)
 {
     if (dest == nullptr || frames <= 0)
         return 0;
