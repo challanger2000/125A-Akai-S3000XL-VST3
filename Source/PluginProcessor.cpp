@@ -73,6 +73,7 @@
 #define VST_TRACE 0
 #define VST_LOG(...) do { if (VST_TRACE && mameMachine != nullptr) mameMachine->logerror(__VA_ARGS__); } while (0)
 #include "diimage.h"
+#include "imagedev/midiin.h" // P030 actual original Akai UART input-image, not RAM access
 
 #include <iomanip>
 #include <fstream>
@@ -270,6 +271,73 @@ bool EnsoniqSD1AudioProcessor::stageWavForCapture(const juce::File& file,
     } catch(const std::exception& e) {
         error=juce::String(e.what());
         return false;
+    }
+}
+// P030: Prepare standard SDS OFF the DAW audio and MAME owner threads.
+bool EnsoniqSD1AudioProcessor::stageWavForOriginalSds(
+    const juce::File& file,juce::String& error)
+{
+    if(!file.existsAsFile() || !file.hasFileExtension(".wav")) {
+        error="Choose a valid .wav file.";return false;
+    }
+    if(!isMameRunningFlag() || !mameIsFullyBooted.load(std::memory_order_acquire)) {
+        error="The original Akai firmware must finish booting before SDS import.";
+        return false;
+    }
+    if(originalSdsStage.load(std::memory_order_acquire)!=0) {
+        error="This original Akai SDS import session already has a transfer. "
+              "Project recall and repeated-import numbering require separate validation.";
+        return false;
+    }
+    const auto capture=static_cast<akai::capture::Stage>(
+        autoCaptureStage.load(std::memory_order_acquire));
+    if(akai::capture::isRunningStage(capture) ||
+       (firmwareWadcsKnown.load(std::memory_order_acquire) &&
+        (firmwareWadcsLatch.load(std::memory_order_acquire)&0x08))) {
+        error="Do not send MIDI samples during a running Akai ADC recording.";
+        return false;
+    }
+    const auto size=file.getSize();
+    if(size<44 || size>static_cast<juce::int64>(akai::wav::maxFileBytes)) {
+        error="Original Akai SDS requires a WAV from 44 bytes to 64 MiB.";
+        return false;
+    }
+    try {
+        juce::FileInputStream input(file);
+        if(input.failedToOpen()) {
+            error="Could not open the selected WAV.";return false;
+        }
+        std::vector<std::uint8_t> bytes(static_cast<std::size_t>(size));
+        if(input.read(bytes.data(),int(bytes.size()))!=int(bytes.size())) {
+            error="The original WAV read was incomplete.";return false;
+        }
+        const auto audio=akai::wav::decode(bytes);
+        const auto prepared=akai::wav::prepare(audio,44100); // original Akai mono 44.1k
+        const auto number=originalSdsNextSampleNumber.load(std::memory_order_acquire);
+        const auto dump=akai::sds::encodeStereoAsMono(
+            prepared.stereo,44100,number,0); // owner-ROM tested SysEx logical ID ZERO
+        const auto output=juce::File(instanceTempDir).getChildFile("sds")
+            .getChildFile("owner-akai-sample-"+juce::String(int(number))+".syx");
+        if(output.getParentDirectory().createDirectory().failed() ||
+           !output.replaceWithData(dump.sysex.data(),dump.sysex.size())) {
+            error="Could not stage the original Akai MIDI Sample Dump.";
+            return false;
+        }
+        {
+            std::lock_guard<std::mutex> lock(originalSdsMutex);
+            if(originalSdsStage.load(std::memory_order_acquire)!=0) {
+                error="An Akai MIDI Sample Dump was queued during WAV preparation.";
+                return false;
+            }
+            originalSdsPendingPath=output.getFullPathName().toStdString();
+            originalSdsPendingDurationMs=dump.transportMillis;
+            originalSdsLastWavName=file.getFileName();
+            originalSdsStage.store(1,std::memory_order_release);
+            originalSdsRequested.store(true,std::memory_order_release);
+        }
+        return true;
+    } catch(const std::exception& ex) {
+        error=juce::String(ex.what());return false;
     }
 }
 void EnsoniqSD1AudioProcessor::clearStagedWav() noexcept
@@ -809,6 +877,8 @@ private:
     int audioMacroHeldBank = -1;   // audio-thread-only: which bank is electronically held
     akai::capture::Controller captureController; // MAME/OSD owner thread only
     int captureHeldIndex = -1; // only release buttons this controller pressed
+    bool originalSdsTransferActive=false; // native MAME owner only
+    std::uint64_t originalSdsFinishAtMs=0;
     akai::machine_state::RestoreMailbox::Work nativeRestoreInFlight{}; // MAME owner only
     akai::machine_state::SnapshotBarrier nativeSnapshotInFlight{}; // MAME owner only
     
@@ -1503,6 +1573,57 @@ public:
                        captureHeldIndex>=0)
                         processor->autoCaptureStage.store(
                             int(captureController.stage()),std::memory_order_release);
+                }
+            }
+            // P030 original Akai MIDI receive. MAME owner thread invokes the real
+            // midiin image device, which serializes each genuine SDS SysEx packet
+            // through the Akai UART. This uses original firmware to create PCM.
+            {
+                const double t=mame_machine->time().as_double();
+                const std::uint64_t now=(std::isfinite(t)&&t>=0.0)
+                    ?std::uint64_t(t*1000.0):0;
+                auto* in=mame_machine->root_device().subdevice<midiin_device>(
+                    "mdin:midiin:midiinimg");
+                if(originalSdsTransferActive && now>=originalSdsFinishAtMs) {
+                    originalSdsTransferActive=false;
+                    // The actual input image's UART stream must be allowed to
+                    // drain before restoring DAW live MIDI. This is not an
+                    // assertion that original firmware assigned a program.
+                    if(in) {
+                        const auto restored=in->load("VST MIDI");
+                        processor->originalSdsStage.store(
+                            restored.first ? 4:3,std::memory_order_release);
+                    } else processor->originalSdsStage.store(
+                        4,std::memory_order_release);
+                }
+                if(!originalSdsTransferActive &&
+                   processor->originalSdsRequested.load(std::memory_order_acquire) &&
+                   !captureController.isRunning() &&
+                   !nativeRestoreInFlight && !nativeSnapshotInFlight.active() &&
+                   !mame_machine->save_or_load_pending()) {
+                    std::string staged;
+                    std::uint64_t duration=0;
+                    {
+                        std::lock_guard<std::mutex> lock(processor->originalSdsMutex);
+                        staged=processor->originalSdsPendingPath;
+                        duration=processor->originalSdsPendingDurationMs;
+                        processor->originalSdsRequested.store(
+                            false,std::memory_order_release);
+                    }
+                    if(in && !staged.empty() && duration>0) {
+                        const auto status=in->load(staged);
+                        if(!status.first) {
+                            originalSdsTransferActive=true;
+                            originalSdsFinishAtMs=now+duration;
+                            processor->originalSdsStage.store(
+                                2,std::memory_order_release);
+                        } else {
+                            processor->originalSdsStage.store(
+                                4,std::memory_order_release);
+                            (void)in->load("VST MIDI");
+                        }
+                    } else processor->originalSdsStage.store(
+                        4,std::memory_order_release);
                 }
             }
             // ==============================================================================
