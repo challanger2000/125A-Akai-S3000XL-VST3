@@ -69,6 +69,13 @@ def check(editor_cpp: str, editor_h: str, processor_cpp: str,
         raise AssertionError("Original MIDI port logic was deleted")
     if 'pushAudioToMame(' not in processor_cpp:
         raise AssertionError("Original native ADC/audio input was deleted")
+    # P047: a stray // may comment out the C++ function definition while
+    # leaving its name in the source. Require a live line-start declaration.
+    if not re.search(
+        r"(?m)^[ \\t]*int\\s+EnsoniqSD1AudioProcessor::pullAudioForMame\\s*\\(",
+        processor_cpp,
+    ):
+        raise AssertionError("Native Akai audio pull definition is absent/commented")
 
 
 def main() -> None:
@@ -90,6 +97,12 @@ def main() -> None:
          '\nautoCaptureRequest.store(true);\n', proc_h),
         (editor_cpp.replace("Eject CD-ROM", "Eject removed CD"),
          editor_h, proc_cpp, proc_h),
+        # The genuine P046 Windows C2447: an accidental comment marker
+        # before the otherwise intact pullAudioForMame() implementation.
+        (editor_cpp, editor_h, proc_cpp.replace(
+            "int EnsoniqSD1AudioProcessor::pullAudioForMame(",
+            "// int EnsoniqSD1AudioProcessor::pullAudioForMame("
+        ), proc_h),
     )
     for n, variant in enumerate(mutants, 1):
         try:
@@ -97,7 +110,7 @@ def main() -> None:
         except AssertionError:
             continue
         raise AssertionError(f"Negative mutation {n} escaped P046 guard")
-    print("P046_NO_EXTERNAL_WAV_IMPORT=PASS; mutant_controls=5; "
+    print("P046_NO_EXTERNAL_WAV_IMPORT=PASS; mutant_controls=6; "
           "MEDIA_FLOPPY_CD_SCSI=PASS; NATIVE_AUDIO_MIDI_STATE_PRESERVED=PASS")
 
 
