@@ -41,19 +41,19 @@ jobs:
              SUBTARGET=s3000xl SOURCES=src/mame/akai/s3000.cpp \
              OSD=sdl USE_QTDEBUG=0 NOWERROR=1 ARCHOPTS_CXX=-std=c++20 \
              CXXFLAGS='-std=c++20'
-          ls -lh external/mame/mames3000xl
+          ls -lh external/mame/s3000xl
       - name: Verify original firmware owner can boot this binary without cloud ROM sharing
         shell: bash
         run: |
           set -euxo pipefail
-          test -x external/mame/mames3000xl
-          external/mame/mames3000xl -help > /tmp/mame-help.txt
+          test -x external/mame/s3000xl
+          external/mame/s3000xl -help > /tmp/mame-help.txt
           grep -qi mame /tmp/mame-help.txt
           mkdir -p owner-local-probe
-          cp external/mame/mames3000xl owner-local-probe/mames3000xl
-          sha256sum owner-local-probe/mames3000xl > owner-local-probe/sha256.txt
+          cp external/mame/s3000xl owner-local-probe/s3000xl
+          sha256sum owner-local-probe/s3000xl > owner-local-probe/sha256.txt
           printf 'ROM-FREE original patched MAME 0.288 Linux executable.\nNO private firmware in CI.\nRun locally with owner-supplied ROM zip only.\n' > owner-local-probe/README.txt
-          file owner-local-probe/mames3000xl
+          file owner-local-probe/s3000xl
       - name: Downloadable ROM-free host binary to make PRIVATE local V2.0 boot test possible
         uses: actions/upload-artifact@v4
         with:
