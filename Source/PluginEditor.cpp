@@ -476,6 +476,19 @@ void EnsoniqSD1AudioProcessorEditor::timerCallback()
         repaint();
     }
     
+    // An incomplete on-wire MIDI Sample Dump is NOT a portable project.
+    // Report failure once, on the UI thread only, without pretending that
+    // another sample already in MAME belongs to the just loaded DAW song.
+    if(audioProcessor.originalSdsRecallRejected.exchange(
+        false,std::memory_order_acq_rel))
+        juce::AlertWindow::showMessageBoxAsync(
+            juce::AlertWindow::WarningIcon,
+            "Akai project recall was rejected",
+            "This DAW project was saved while the original Akai MIDI Sample "
+            "Dump or its keygroup assignment was unfinished. It contains "
+            "no complete original sampler state. The previous instrument "
+            "state was left unchanged; import the WAV again, wait until "
+            "the Akai firmware confirms the program and save the project.");
     bool missing = audioProcessor.isRomMissing.load(std::memory_order_acquire);
     bool invalid = audioProcessor.isRomInvalid.load(std::memory_order_acquire);
     bool checkFailed = audioProcessor.isSelfCheckFailed.load(std::memory_order_acquire);
