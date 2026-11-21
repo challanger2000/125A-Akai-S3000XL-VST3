@@ -27,3 +27,12 @@ The original 88,200-frame import MIDI file was **hidden and unavailable througho
 Thus the **actual production 60-tick spacing is now owner-original-ROM positively verified** for a two-second waveform, not merely inferred from the MIDI standard. Previous 42-tick original-ROM negative controls remain valid. Local evidence: /tmp/akai-p041-88200-t60-zone-182.png, /tmp/akai-p042-88200-replay-launch.log. No binary assets are published.
 
 **Remaining boundary:** Windows **owner-original-ROM VST3** original firmware + plugin host audio/GUI/DAW project reopen is **NOT YET VERIFIED**. ROM-free GitHub Windows/Linux C++ contracts do not count as Windows owner-ROM acceptance. Proprietary owner ROMs, MIDI source, PCM WAVs and native .sta never enter the public repository.
+
+
+## P043 independent acoustic source-identity challenge — NO-GO
+
+**2026-11-21 later evidence:** The two-second owner original-ROM P042 results above establish genuine MIDI-SDS reception, native LCD assignment and nonzero, repeatable original-MAME PCM with the transfer source unavailable on replay. They **do not** independently establish that the note PCM is actually derived from the WAV content, because no paired all-zero-vs-distinguishable-WAV counterfactual was executed in that test. Do not interpret the previous “audible” or “bit-identical” language as proof of WAV-source fidelity.
+
+A separate original-ROM native MAME adversarial test with two 800-frame WAV inputs (nonzero evolving waveform A versus exact-zero B) produced the same displayed `MIDI 99` keygroup and **byte-identical** real MIDI note output after separate original-state reloads, although the source files differed. Both replayed outputs were nonzero. This is a concrete release-blocking source-identity counterexample for that fixture. Exact media versions, PCM hashes, controls and unresolved root-cause alternatives: [P043 NO-GO](P043-OWNER-ROM-SDS-SOURCE-IDENTITY-COUNTEREXAMPLE.md).
+
+**Updated conclusion:** P042's packet-pacing findings remain valid *within their actually executed cases*, but user-WAV causal PCM playback, original sample-RAM content and Windows VST3/DAW recall remain **NOT VERIFIED / NO-GO** pending source-sensitive negative controls and subsequent independent acceptance.
