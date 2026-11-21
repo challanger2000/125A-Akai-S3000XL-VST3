@@ -12,7 +12,8 @@ namespace akai::capture {
 enum class Button: unsigned char {
     None, Sample, RecF2, ArmF8, GoF7, Name, Enter,
     Digit0, Digit1, Digit2, Digit3, Digit4, Digit5, Digit6, Digit7, Digit8, Digit9,
-    CursorDown, CursorRight
+    CursorDown, CursorRight,
+    SelectSingle, EditProgram, KeygroupsF2, SamplePageF6
 };
 enum class Command: unsigned char { None, Press, Release };
 enum class Stage: int {
@@ -24,9 +25,15 @@ enum class Stage: int {
     ConfirmName=16, WaitNamed=17,
     PressBootSkip=18, WaitBootReady=19,
     PressTimeDown=30, PressTimeRight=31, TypeTime=32, VerifyTime=33,
+    PressSelectSingle=40, WaitSelectSingle=41,
+    PressEditProgram=42, WaitEditProgram=43,
+    PressKeygroups=44, WaitKeygroups=45,
+    PressSamplePage=46, WaitSamplePage=47,
+    PressAssignName=48, PressAssignNumeric=49, TypeAssignName=50,
+    ConfirmAssignName=51, WaitAssigned=52,
     NeedNewSample=20, NoReadableLcd=21, OverwriteRisk=22,
     TimedOut=23, Busy=24, Cancelled=25,
-    SourceUnavailable=26, SampleTruncated=27
+    SourceUnavailable=26, SampleTruncated=27, ProgramUnassigned=28
 };
 struct Observe {
     // Exactly the CURRENT displayed LCD text, never stale unmapped RAM.
@@ -115,11 +122,67 @@ inline std::uint32_t displayedRecordCentis(std::string_view lcd) noexcept {
     }
     return 0;
 }
+
+// P026: exact native 40-column text-display checks, not an assumption that
+// completing the REC page made the waveform MIDI-playable.
+inline bool originalSelectProgramPage(std::string_view lcd) noexcept {
+    return contains(lcd,"PROGRAMS IN MEMORY") && contains(lcd,"SLCT")
+       && contains(lcd,"TEST PROGRAM");
+}
+inline bool originalProgramEditPage(std::string_view lcd) noexcept {
+    return contains(lcd,"PROGRAM EDIT") && contains(lcd,"KEYGROUPS:")
+       && contains(lcd,"TEST PROGRAM");
+}
+// Original V2.0 pads these value fields to fixed LCD columns. Compare
+// the actual numeric field after its caption, ignoring ONLY padding spaces.
+inline bool originalNumericFieldOne(std::string_view lcd,
+                                    std::string_view caption) noexcept {
+    for(std::size_t i=0;i+caption.size()<=lcd.size();++i){
+        if(!contains(lcd.substr(i,caption.size()),caption))continue;
+        std::size_t p=i+caption.size();
+        while(p<lcd.size() && lcd[p]==' ')++p;
+        return p<lcd.size() && lcd[p]=='1'
+            && (p+1==lcd.size() || lcd[p+1]<'0' || lcd[p+1]>'9');
+    }
+    return false;
+}
+inline bool originalKeygroupsPage(std::string_view lcd) noexcept {
+    return originalNumericFieldOne(lcd,"KEYGROUPS IN PROGRAM:")
+       && originalNumericFieldOne(lcd,"ACTIVE KEYGROUP NUMBER:")
+       && contains(lcd,"SMPL") && contains(lcd,"TEST PROGRAM");
+}
+inline bool originalSampleZonePage(std::string_view lcd) noexcept {
+    return contains(lcd,"KG:") && contains(lcd,"ED:ONE")
+       && contains(lcd,"V-LO") && contains(lcd,"V-HI")
+       && contains(lcd,"SMP1") && contains(lcd,"TEST PROGRAM");
+}
+// Measured with original V2.0: a NON-EXISTENT sample written into zone 1
+// appears as "1 125000000001 ? 0 127", while a recorded sample omits that
+// question mark. Other unassigned zones show '?' too, so do NOT scan the
+// entire LCD for question marks. The Akai LCD is exactly 8 x 40 bytes.
+inline bool originalZoneOneAssigned(std::string_view lcd,
+                                    std::string_view sample) noexcept {
+    if(sample.size()!=12 || lcd.size()!=320
+       || !originalSampleZonePage(lcd))return false;
+    for(std::size_t r=0;r<8;++r){
+        const auto line=lcd.substr(r*40,40);
+        if(line[0]!='1')continue;
+        const auto at=line.find(sample);
+        if(at<2 || at>5 || at==std::string_view::npos)continue;
+        const auto end=at+sample.size();
+        if(end+5>40)continue;
+        // Only the zone-1 name's validity marker, not empty zones 2-4.
+        if(contains(line.substr(end,5),"?"))return false;
+        return contains(line.substr(end,12),"127");
+    }
+    return false;
+}
 constexpr bool isRunningStage(Stage s) noexcept {
     return (s>=Stage::WaitWav && s<=Stage::WaitStop)
         || (s>=Stage::PressName && s<=Stage::WaitNamed)
         || s==Stage::PressBootSkip || s==Stage::WaitBootReady
-        || (s>=Stage::PressTimeDown && s<=Stage::VerifyTime);
+        || (s>=Stage::PressTimeDown && s<=Stage::VerifyTime)
+        || (s>=Stage::PressSelectSingle && s<=Stage::WaitAssigned);
 }
 constexpr Button numericButton(char digit) noexcept {
     switch(digit){
@@ -143,6 +206,7 @@ public:
         recordCentis_=requestedRecordCentis;
         timeDownCount_=0;
         timeDigitIndex_=0;
+        assignedDigitIndex_=0;
         timeDigitCount_=1;
         for(auto n=recordCentis_;n>=10;n/=10)++timeDigitCount_;
         stage_=Stage::WaitWav; enteredMs_=ms; held_=Button::None;
@@ -184,7 +248,9 @@ public:
              !o.wavReady)
             return finish(Stage::SourceUnavailable);
         if(ms>=enteredMs_ && ms-enteredMs_>timeoutForStage())
-            return finish(stage_==Stage::WaitNewSample?Stage::NeedNewSample
+            return finish(stage_>=Stage::PressSelectSingle &&
+                          stage_<=Stage::WaitAssigned?Stage::ProgramUnassigned
+                        :stage_==Stage::WaitNewSample?Stage::NeedNewSample
                         :(!o.readable && (stage_==Stage::WaitSetup ||
                            stage_==Stage::WaitNewSample))?Stage::NoReadableLcd
                         :Stage::TimedOut);
@@ -205,6 +271,17 @@ public:
                     if(++timeDownCount_>=4)transition(Stage::PressTimeRight,ms);
                     break;
                 case Stage::PressTimeRight: transition(Stage::TypeTime,ms);break;
+                case Stage::PressSelectSingle: transition(Stage::WaitSelectSingle,ms);break;
+                case Stage::PressEditProgram: transition(Stage::WaitEditProgram,ms);break;
+                case Stage::PressKeygroups: transition(Stage::WaitKeygroups,ms);break;
+                case Stage::PressSamplePage: transition(Stage::WaitSamplePage,ms);break;
+                case Stage::PressAssignName: transition(Stage::PressAssignNumeric,ms);break;
+                case Stage::PressAssignNumeric: transition(Stage::TypeAssignName,ms);break;
+                case Stage::TypeAssignName:
+                    if(++assignedDigitIndex_>=12)
+                        transition(Stage::ConfirmAssignName,ms);
+                    break;
+                case Stage::ConfirmAssignName: transition(Stage::WaitAssigned,ms);break;
                 case Stage::TypeTime:
                     if(++timeDigitIndex_>=timeDigitCount_)
                         transition(Stage::VerifyTime,ms);
@@ -351,7 +428,53 @@ public:
                 break;
             case Stage::WaitStop:
                 if(!o.wavSourcePresent) return finish(Stage::SourceUnavailable);
-                if(o.wadcsKnown && (o.wadcs&0x08)==0)
+                if(o.wadcsKnown && (o.wadcs&0x08)==0) {
+                    // Recording alone does NOT assign the sample to a
+                    // playable Akai program. Use real SINGLE/EDIT keys.
+                    transition(Stage::PressSelectSingle,ms);
+                    return press(Button::SelectSingle,ms);
+                }
+                break;
+            case Stage::WaitSelectSingle:
+                if(o.readable && originalSelectProgramPage(o.lcd)) {
+                    transition(Stage::PressEditProgram,ms);
+                    return press(Button::EditProgram,ms);
+                }
+                break;
+            case Stage::WaitEditProgram:
+                if(o.readable && originalProgramEditPage(o.lcd)) {
+                    transition(Stage::PressKeygroups,ms);
+                    return press(Button::KeygroupsF2,ms);
+                }
+                break;
+            case Stage::WaitKeygroups:
+                if(o.readable && originalKeygroupsPage(o.lcd)) {
+                    transition(Stage::PressSamplePage,ms);
+                    return press(Button::SamplePageF6,ms);
+                }
+                break;
+            case Stage::WaitSamplePage:
+                if(o.readable && originalSampleZonePage(o.lcd)) {
+                    if(assignedInCurrentProgram(o.lcd))
+                        return finish(Stage::RecordedSample);
+                    transition(Stage::PressAssignName,ms);
+                    return press(Button::Name,ms);
+                }
+                break;
+            case Stage::PressAssignNumeric:
+                if(o.readable && lettersEditorVisible(o.lcd))
+                    return press(Button::Name,ms);
+                break;
+            case Stage::TypeAssignName:
+                if(o.readable && numbersEditorVisible(o.lcd))
+                    return press(numericButton(generatedDigit(assignedDigitIndex_)),ms);
+                break;
+            case Stage::ConfirmAssignName:
+                if(o.readable && numbersEditorVisible(o.lcd))
+                    return press(Button::Enter,ms);
+                break;
+            case Stage::WaitAssigned:
+                if(o.readable && assignedInCurrentProgram(o.lcd))
                     return finish(Stage::RecordedSample);
                 break;
             default:break;
@@ -368,6 +491,12 @@ private:
     unsigned nameIndex_=0, nameRetries_=0, bootSkipAttempts_=0;
     std::uint32_t recordCentis_=0;
     unsigned timeDownCount_=0, timeDigitIndex_=0, timeDigitCount_=1;
+    unsigned assignedDigitIndex_=0;
+    bool assignedInCurrentProgram(std::string_view lcd)const noexcept {
+        char name[12];
+        for(unsigned i=0;i<12;++i)name[i]=generatedDigit(i);
+        return originalZoneOneAssigned(lcd,std::string_view(name,12));
+    }
     char recordDigit(unsigned index)const noexcept{
         std::uint32_t divisor=1;
         for(unsigned n=index+1;n<timeDigitCount_;++n)divisor*=10u;

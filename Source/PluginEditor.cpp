@@ -494,6 +494,9 @@ void EnsoniqSD1AudioProcessorEditor::timerCallback()
         else if(captureStage>=akai::capture::Stage::PressName
              && captureStage<=akai::capture::Stage::WaitNamed)
             loadMediaButton.setButtonText("WAV NAME");
+        else if(captureStage>=akai::capture::Stage::PressSelectSingle
+             && captureStage<=akai::capture::Stage::WaitAssigned)
+            loadMediaButton.setButtonText("WAV MAP");
         else
             loadMediaButton.setButtonText("WAV ARM");
     } else if(captured)
@@ -502,7 +505,7 @@ void EnsoniqSD1AudioProcessorEditor::timerCallback()
         loadMediaButton.setButtonText("MEDIA");
     // One precise message per failure, never a repeated modal at 30 Hz.
     const int statusCode=int(captureStage);
-    if (statusCode>=20 && statusCode!=lastCaptureNotice) {
+    if (statusCode>=20 && statusCode<=28 && statusCode!=lastCaptureNotice) {
         lastCaptureNotice=statusCode;
         juce::String details;
         if(captureStage==akai::capture::Stage::NeedNewSample)
@@ -529,6 +532,11 @@ void EnsoniqSD1AudioProcessorEditor::timerCallback()
             details="The Akai stopped recording before the WAV finished. "
                     "Increase the Akai REC TIME to cover the whole WAV, then import again. "
                     "The shortened recording is NOT accepted as a complete import.";
+        else if(captureStage==akai::capture::Stage::ProgramUnassigned)
+            details="The WAV was recorded by the original Akai firmware but the "
+                    "original TEST PROGRAM's first keygroup did not confirm a valid "
+                    "sample assignment. The WAV is NOT yet MIDI-playable. "
+                    "No guessed sample-memory or program data was written.";
         if(details.isNotEmpty())
             juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::WarningIcon,
                 "Akai WAV recording",details);

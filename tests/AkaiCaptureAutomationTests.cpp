@@ -3,6 +3,7 @@
 #include "../Source/AkaiCaptureAutomation.h"
 #include <cstdio>
 #include <cstdlib>
+#include <string>
 using namespace akai::capture;
 static int n=0;
 static void ck(bool ok,const char* id){++n;if(!ok){std::fprintf(stderr,"FAIL %s\n",id);std::exit(1);}}
@@ -247,8 +248,98 @@ int main(){
     r=c.step(at("RECORDING analog",true,0x8a,true),980);
     ck(r.stage==Stage::WaitStop,"wav_exhausted_wait_native_stop");
     r=c.step(at("RECORDING analog",true,0xa2,true),1150);
-    ck(r.stage==Stage::RecordedSample,"firmware_stop_seen");
-    ck(!c.isRunning(),"finished_and_stopped");
+    ck(r.stage==Stage::PressSelectSingle && r.command==Command::Press
+       && r.button==Button::SelectSingle,"firmware_stop_starts_native_keygroup_assignment");
+    ck(c.isRunning(),"recorded_but_not_yet_midi_playable");
+    r=c.step(at("RECORD MONO exists!"),1271);
+    ck(r.stage==Stage::WaitSelectSingle && r.command==Command::Release,
+       "native_single_key_release");
+    r=c.step(at("PROGRAMS IN MEMORY TEST PROGRAM SLCT MIX MIDI LOUD DISK DEL RNUM"),1300);
+    ck(r.stage==Stage::PressEditProgram && r.command==Command::Press
+       && r.button==Button::EditProgram,"single_default_test_program_selected");
+    r=c.step(at("PROGRAMS IN MEMORY TEST PROGRAM SLCT"),1421);
+    ck(r.stage==Stage::WaitEditProgram && r.command==Command::Release,
+       "native_edit_key_released");
+    r=c.step(at("PROGRAM EDIT program: TEST PROGRAM keygroups: 1"),1450);
+    ck(r.stage==Stage::PressKeygroups && r.command==Command::Press
+       && r.button==Button::KeygroupsF2,"original_f2_enters_keygroups");
+    r=c.step(at("PROGRAM EDIT"),1571);
+    ck(r.stage==Stage::WaitKeygroups && r.command==Command::Release,
+       "release_keygroups_softkey");
+    ck(originalKeygroupsPage("KEYGROUPS Keygroups in Program:   1  (+ -) active Keygroup number:  1 Edit: ONE TEST PROGRAM SMPL"),
+       "native_fixed_width_keygroups_spaces_detected");
+    ck(!originalKeygroupsPage("KEYGROUPS Keygroups in Program:  2 active Keygroup number: 1 TEST PROGRAM SMPL"),
+       "multi_keygroup_not_mistaken_for_default");
+    ck(!originalKeygroupsPage("KEYGROUPS Keygroups in Program:  1 active Keygroup number: 10 TEST PROGRAM SMPL"),
+       "keygroup_ten_not_mistaken_for_one");
+    r=c.step(at("KEYGROUPS Keygroups in Program:   1  (+ -) active Keygroup number:  1 Edit: ONE SMPL TEST PROGRAM"),1600);
+    ck(r.stage==Stage::PressSamplePage && r.command==Command::Press
+       && r.button==Button::SamplePageF6,"original_f6_enters_sample_assignment");
+    r=c.step(at("KEYGROUPS"),1721);
+    ck(r.stage==Stage::WaitSamplePage && r.command==Command::Release,
+       "release_sample_assignment_softkey");
+    std::string zoneHead="C_0-G_8 KG: 1 ED:ONE TEST PROGRAM";
+    std::string zoneLabels="zn sample V-lo V-hi pitch";
+    auto nativePage=[&](bool assigned) {
+        std::string text;
+        for(const auto& line : {zoneHead,zoneLabels,
+             std::string(assigned?"1 125000000001   0 127 TRACK Xfd":
+                                  "1 125000000001 ? 0 127 TRACK Xfd"),
+             std::string("2 ? 0 0 TRACK ON"),
+             std::string("3 ? 0 0 TRACK"),
+             std::string("4 ? 0 0 TRACK"),
+             std::string("SMP1 SMP2 SMP3"),
+             std::string("")}) {
+            auto padded=line;
+            padded.resize(40,' ');
+            text+=padded;
+        }
+        return text;
+    };
+    const auto missingZone=nativePage(false),validZone=nativePage(true);
+    ck(!originalZoneOneAssigned(missingZone,"125000000001"),
+       "native_missing_sample_question_mark_reject");
+    ck(originalZoneOneAssigned(validZone,"125000000001"),
+       "native_present_sample_name_and_no_missing_marker");
+    ck(!originalZoneOneAssigned(validZone,"125000000002"),
+       "wrong_sample_never_reused");
+    ck(!originalZoneOneAssigned("TEST PROGRAM 125000000001","125000000001"),
+       "non_40x8_fake_native_page_rejected");
+    r=c.step(at(missingZone),1750);
+    ck(r.stage==Stage::PressAssignName && r.command==Command::Press
+       && r.button==Button::Name,"original_sample_field_name_editor");
+    r=c.step(at(missingZone),1871);
+    ck(r.stage==Stage::PressAssignNumeric && r.command==Command::Release,
+       "original_sample_field_name_release");
+    r=c.step(at("LETTERS ..(NAME for numbers ENT to exit)"),1900);
+    ck(r.command==Command::Press&&r.button==Button::Name,
+       "native_zone_sample_numeric_mode");
+    r=c.step(at("NUMBERS ..(NAME for letters ENT to exit)"),2021);
+    ck(r.stage==Stage::TypeAssignName && r.command==Command::Release,
+       "native_zone_numeric_mode_release");
+    constexpr char serial[]="125000000001";
+    for(unsigned i=0;i<12;++i) {
+        const auto ms=2050+200*i;
+        r=c.step(at("NUMBERS ..(NAME for letters ENT to exit)"),ms);
+        ck(r.command==Command::Press && r.button==numericButton(serial[i]),
+           "same_generated_name_sample_and_keygroup");
+        r=c.step(at("NUMBERS ..(NAME for letters ENT to exit)"),ms+121);
+        ck(r.command==Command::Release,"native_assignment_digit_release");
+    }
+    ck(r.stage==Stage::ConfirmAssignName,"all_12_original_sample_name_digits");
+    r=c.step(at("NUMBERS ..(NAME for letters ENT to exit)"),4500);
+    ck(r.command==Command::Press && r.button==Button::Enter,
+       "commit_original_keygroup_sample_assignment");
+    r=c.step(at("NUMBERS ..(NAME for letters ENT to exit)"),4621);
+    ck(r.command==Command::Release && r.stage==Stage::WaitAssigned,
+       "release_original_keygroup_enter");
+    r=c.step(at(missingZone),4650);
+    ck(r.command==Command::None && r.stage==Stage::WaitAssigned,
+       "never_accept_nonexistent_waveform_as_midi_playable");
+    r=c.step(at(validZone),4800);
+    ck(r.stage==Stage::RecordedSample && !c.isRunning(),
+       "original_firmware_confirmed_keygroup_final_success");
+    ck(!isRunningStage(Stage::RecordedSample),"final_state_is_not_running");
     Controller nav;ck(nav.start(0),"second_start");
     r=nav.step(at("SINGLE PROGRAM MODE"),5);
     ck(r.command==Command::Press&&r.button==Button::Sample,"navigate_to_sample");
