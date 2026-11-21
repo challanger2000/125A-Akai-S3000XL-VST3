@@ -51,3 +51,8 @@ add_test(NAME akai_sds_project_recall_guard_contract COMMAND akai_sds_project_re
 add_executable(akai_wav_to_sds_e2e_contract_tests AkaiWavToSdsE2ETests.cpp)
 target_compile_features(akai_wav_to_sds_e2e_contract_tests PRIVATE cxx_std_20)
 add_test(NAME akai_original_wav_to_sds_e2e_contract COMMAND akai_wav_to_sds_e2e_contract_tests)
+
+# P042: MIDI image loading cannot silently fall back to a fake live port
+add_executable(akai_midi_port_fail_closed_tests AkaiMidiPortGuardTests.cpp)
+target_compile_features(akai_midi_port_fail_closed_tests PRIVATE cxx_std_20)
+add_test(NAME akai_midi_image_fail_closed_contract COMMAND akai_midi_port_fail_closed_tests)

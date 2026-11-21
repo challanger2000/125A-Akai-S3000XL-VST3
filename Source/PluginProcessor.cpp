@@ -77,6 +77,7 @@
 #include "AkaiSdsAssignment.h" // P031 original LCD keygroup verification
 #include "AkaiSdsBootGate.h" // P035 original firmware boot before MIDI SDS
 #include "AkaiSdsStateGuard.h" // P036 no DAW recall snapshot mid SDS
+#include "AkaiMidiPortGuard.h" // P042 missing .mid must not become fake MIDI port
 
 #include <iomanip>
 #include <fstream>
@@ -1951,6 +1952,11 @@ public:
     virtual bool execute_command(const char *command) override { return false; };
 
     virtual std::unique_ptr<osd::midi_input_port> create_midi_input(std::string_view name) override {
+        // P042: MAME's midi image device attempts to fall back to an OSD MIDI
+        // port when a .mid path cannot be opened. Accepting ANY name here
+        // made a deleted/corrupt SDS import file appear successfully loaded
+        // while the original Akai firmware received no sample at all.
+        if (!akai::sds::isLiveVstMidiInputPort(name)) return {};
         return std::make_unique<VstMidiInputPort>(processor);
     };
     
