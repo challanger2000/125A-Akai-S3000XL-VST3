@@ -1447,6 +1447,10 @@ public:
                     auto findIndex=[&](akai::capture::Button key) {
                         const char* tag=nullptr;
                         switch(key) {
+                        case akai::capture::Button::SelectSingle:tag="btn_single";break;
+                        case akai::capture::Button::EditProgram:tag="btn_edit";break;
+                        case akai::capture::Button::KeygroupsF2:tag="btn_f2";break;
+                        case akai::capture::Button::SamplePageF6:tag="btn_f6";break;
                         case akai::capture::Button::Sample:tag="btn_sample";break;
                         case akai::capture::Button::RecF2:tag="btn_f2";break;
                         case akai::capture::Button::ArmF8:tag="btn_f8";break;
