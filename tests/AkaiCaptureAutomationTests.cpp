@@ -105,6 +105,55 @@ int main(){
     r=lostDuring.step(missing,850);
     ck(r.stage==Stage::SourceUnavailable && !lostDuring.isRunning(),
        "lost_source_during_record_fails_closed");
+    // P018 regression: a fresh original-firmware REC page usually has
+    // an EXISTING sample name; it must be named through panel keys instead
+    // of the old 8-second NeedNewSample timeout.
+    Controller autoNamed;ck(autoNamed.start(0),"auto_name_start");
+    r=autoNamed.step(at("RECORD SET-UP"),0);
+    ck(r.button==Button::RecF2,"auto_name_setup_to_rec");
+    r=autoNamed.step(at("RECORD SET-UP"),121);
+    ck(r.command==Command::Release,"auto_name_rec_released");
+    r=autoNamed.step(at("RECORD MONO SINE C3"),550);
+    ck(r.button==Button::Name && r.stage==Stage::PressName,
+       "auto_name_uses_original_name_button");
+    r=autoNamed.step(at("NAME SAMPLE"),680);
+    ck(r.command==Command::Release && r.button==Button::Name,
+       "auto_name_release_first_name_key");
+    r=autoNamed.step(at("NAME SAMPLE"),690);
+    ck(r.command==Command::Press && r.button==Button::Name,
+       "auto_name_toggle_numeric_mode");
+    r=autoNamed.step(at("NAME SAMPLE"),820);
+    ck(r.command==Command::Release && r.stage==Stage::TypeName,
+       "auto_name_numeric_ready");
+    for(unsigned i=0;i<12;++i){
+        auto atMs=1000+170*i;
+        r=autoNamed.step(at("NAMING"),atMs);
+        ck(r.command==Command::Press && r.button==
+            (i==0?Button::Digit1:i==1?Button::Digit2:
+             i==2?Button::Digit5:i==11?Button::Digit1:Button::Digit0),
+             "auto_name_correct_12_digit_sequence");
+        r=autoNamed.step(at("NAMING"),atMs+121);
+        ck(r.command==Command::Release,"auto_name_each_key_released");
+    }
+    r=autoNamed.step(at("NAMING"),3100);
+    ck(r.command==Command::Press && r.button==Button::Enter,
+       "auto_name_enter");
+    r=autoNamed.step(at("NAMING"),3230);
+    ck(r.command==Command::Release && r.stage==Stage::WaitNamed,
+       "auto_name_enter_released");
+    r=autoNamed.step(at("RECORD MONO * NEW * 125000000001"),3400);
+    ck(r.command==Command::Press && r.button==Button::ArmF8,
+       "auto_name_only_arm_after_real_firmware_unique_confirmation");
+    // Disappearing source during name entry must cancel and release keys.
+    Controller vanish;ck(vanish.start(0),"name_vanish_begin");
+    vanish.step(at("RECORD SET-UP"),0);
+    vanish.step(at("RECORD SET-UP"),121);
+    vanish.step(at("RECORD MONO SINE"),540);
+    r=vanish.step(at("NAMING",false),600);
+    ck(r.stage==Stage::SourceUnavailable && r.button==Button::Name &&
+       r.command==Command::Release,"name_source_lost_releases_button");
+    ck(isRunningStage(Stage::TypeName)&&!isRunningStage(Stage::RecordedSample),
+       "busy_stage_guard_knows_name_digits");
     Controller unknown;ck(unknown.start(0),"unknown_start");
     Observe noDisplay=at("",true);noDisplay.readable=false;
     r=unknown.step(noDisplay,100);

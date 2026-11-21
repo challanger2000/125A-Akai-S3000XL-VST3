@@ -212,8 +212,8 @@ bool EnsoniqSD1AudioProcessor::stageWavForCapture(const juce::File& file,
         const auto status=static_cast<akai::wav_capture::State>(
             wavState.load(std::memory_order_acquire));
         const int autoStage=autoCaptureStage.load(std::memory_order_acquire);
-        const bool automationActive=autoStage>=int(akai::capture::Stage::WaitWav)
-            && autoStage<=int(akai::capture::Stage::WaitStop);
+        const bool automationActive=akai::capture::isRunningStage(
+            static_cast<akai::capture::Stage>(autoStage));
         const bool firmwareRecording=firmwareWadcsKnown.load(std::memory_order_acquire)
             && (firmwareWadcsLatch.load(std::memory_order_acquire)&0x08)!=0;
         return akai::wav_capture::canStage(status,firmwareRecording,automationActive,
@@ -1387,6 +1387,18 @@ public:
                         case akai::capture::Button::RecF2:tag="btn_f2";break;
                         case akai::capture::Button::ArmF8:tag="btn_f8";break;
                         case akai::capture::Button::GoF7:tag="btn_f7";break;
+                        case akai::capture::Button::Name:tag="btn_name";break;
+                        case akai::capture::Button::Enter:tag="btn_enter";break;
+                        case akai::capture::Button::Digit0:tag="btn_key0";break;
+                        case akai::capture::Button::Digit1:tag="btn_key1";break;
+                        case akai::capture::Button::Digit2:tag="btn_key2";break;
+                        case akai::capture::Button::Digit3:tag="btn_key3";break;
+                        case akai::capture::Button::Digit4:tag="btn_key4";break;
+                        case akai::capture::Button::Digit5:tag="btn_key5";break;
+                        case akai::capture::Button::Digit6:tag="btn_key6";break;
+                        case akai::capture::Button::Digit7:tag="btn_key7";break;
+                        case akai::capture::Button::Digit8:tag="btn_key8";break;
+                        case akai::capture::Button::Digit9:tag="btn_key9";break;
                         default:return -1;
                         }
                         for(size_t n=0;n<processor->sd1Buttons.size();++n)
