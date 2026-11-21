@@ -249,12 +249,12 @@ int main(){
         }
         return text;
     };
-    const auto missingZone=nativePage(false),valid=nativePage(true);
+    const auto missingZone=nativePage(false),validZone=nativePage(true);
     ck(!originalZoneOneAssigned(missingZone,"125000000001"),
        "native_missing_sample_question_mark_reject");
-    ck(originalZoneOneAssigned(valid,"125000000001"),
+    ck(originalZoneOneAssigned(validZone,"125000000001"),
        "native_present_sample_name_and_no_missing_marker");
-    ck(!originalZoneOneAssigned(valid,"125000000002"),
+    ck(!originalZoneOneAssigned(validZone,"125000000002"),
        "wrong_sample_never_reused");
     ck(!originalZoneOneAssigned("TEST PROGRAM 125000000001","125000000001"),
        "non_40x8_fake_native_page_rejected");
