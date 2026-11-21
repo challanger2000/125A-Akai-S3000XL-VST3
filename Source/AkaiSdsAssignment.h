@@ -14,14 +14,22 @@ inline bool validOriginalZoneOne(std::string_view lcd,
  for(std::size_t row=0;row<8;++row) {
   const auto line=lcd.substr(row*40,40);
   if(line[0]!='1')continue;
-  const auto at=line.find(sample);
+  // Original V2.0 visually pads the received sample name as
+  // 'MIDI      99' (not the contiguous source string 'MIDI 99').
+  // Require the same exact prefix and final 2 digits after padding.
+  if(sample!="MIDI 99")return false; // no guesses about new sample numbers
+  const auto at=line.find("MIDI");
   if(at==std::string_view::npos || at<2 || at>9)continue;
-  const auto end=at+sample.size();
-  // Original Akai velocity columns: a zone's "?" flags non-existent
-  // samples; zone 2..4 are legitimately empty and MUST NOT be scanned.
-  if(end>=40 || line.find('?',at)!=std::string_view::npos
-      && line.find('?',at)<line.find("127",at))return false;
-  if(line.find("127",end)==std::string_view::npos)return false;
+  auto index=at+4;
+  while(index<line.size() && line[index]==' ')++index;
+  if(index+2>line.size() || line.substr(index,2)!="99")return false;
+  const auto end=index+2;
+  const auto vel127=line.find("127",end);
+  if(vel127==std::string_view::npos)return false;
+  // Only the zone ONE validity flag between sample name and velocity.
+  // Empty zones 2-4 may have '?' and are not failure markers.
+  if(line.substr(end,vel127-end).find('?')!=std::string_view::npos)
+   return false;
   return true;
  }
  return false;
