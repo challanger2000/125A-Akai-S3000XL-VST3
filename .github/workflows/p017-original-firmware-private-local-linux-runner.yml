@@ -39,7 +39,7 @@ jobs:
           set -euxo pipefail
           make -C external/mame -j3 \
              SUBTARGET=s3000xl SOURCES=src/mame/akai/s3000.cpp \
-             OSD=sdl USE_QTDEBUG=0 NOWERROR=1 ARCHOPTS_CXX=-std=c++20 \
+             OSD=sdl USE_QTDEBUG=0 NO_X11=0 NOWERROR=1 ARCHOPTS_CXX=-std=c++20 \
              CXXFLAGS='-std=c++20'
           ls -lh external/mame/s3000xl
       - name: Verify original firmware owner can boot this binary without cloud ROM sharing
