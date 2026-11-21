@@ -8,6 +8,7 @@ on:
       - 'Source/AkaiFirmwareMonitor.h'
       - 'Source/AkaiWavInput.h'
       - 'Source/AkaiCaptureAutomation.h'
+      - 'Source/AkaiInstanceAudioState.h'
       - 'tests/**'
   pull_request:
     paths:
@@ -16,6 +17,7 @@ on:
       - 'Source/AkaiFirmwareMonitor.h'
       - 'Source/AkaiWavInput.h'
       - 'Source/AkaiCaptureAutomation.h'
+      - 'Source/AkaiInstanceAudioState.h'
       - 'tests/**'
 permissions:
   contents: read

@@ -287,12 +287,16 @@ int EnsoniqSD1AudioProcessor::pullAudioForMame(int16_t* dest, int frames)
     // same mistake this project has now made three times. It counts CALLS instead, and prints
     // unconditionally.
     {
-        static uint64_t calls = 0, asked = 0, got = 0;
+        auto& meter = instanceAudio.meter;
+        auto& calls = meter.calls;
+        auto& asked = meter.asked;
+        auto& got = meter.got;
         // [SAMPLING 121] LEFT AND RIGHT KEPT APART. The old meter took the MAXIMUM of the two, so a
         // silent right channel read exactly like a live one - and this number has been quoted as proof
         // that the input is correct. Thor's hypothesis is that the right side never arrives at all;
         // this is the point in the chain where that is decided.
-        static int16_t peak = 0, peakR = 0;
+        auto& peak = meter.peakL;
+        auto& peakR = meter.peakR;
         for (int i = 0; VST_TRACE && i < have; i++) {
             const int16_t l = dest[i * SAMPLER_IN_CHANNELS], rr = dest[i * SAMPLER_IN_CHANNELS + 1];
             const int16_t al = int16_t(std::abs(int(l)));
@@ -312,7 +316,7 @@ int EnsoniqSD1AudioProcessor::pullAudioForMame(int16_t* dest, int frames)
             const uint64_t w = getSamplerInWritten(), r = getSamplerInRead();
             const uint64_t fill = w - r;
             const uint64_t dropped = samplerInDropped.load(std::memory_order_relaxed);
-            static uint64_t lastDropped = 0;
+            auto& lastDropped = meter.lastDropped;
             const uint64_t dropNow = dropped - lastDropped;
             lastDropped = dropped;
 
@@ -322,8 +326,8 @@ int EnsoniqSD1AudioProcessor::pullAudioForMame(int16_t* dest, int frames)
             // produces, the ring must overflow no matter how large it is, and no amount of buffering
             // will fix it; if the two rates match and the fill still swings, it is jitter and a deeper
             // ring or a smoother drop policy is the answer. Those need opposite fixes.
-            static double lastT = 0.0;
-            static uint64_t lastW = 0;
+            auto& lastT = meter.lastT;
+            auto& lastW = meter.lastW;
             const double nowT = (mameMachine != nullptr) ? mameMachine->time().as_double() : 0.0;
             const double dt = nowT - lastT;
             const double inRate      = (dt > 0.0) ? double(w - lastW) / dt : 0.0;   // DAW -> ring
@@ -373,21 +377,10 @@ int EnsoniqSD1AudioProcessor::pullAudioForMame(int16_t* dest, int frames)
     // measured in single frames per second - orders of magnitude more than needed, applied one frame at
     // a time so it is spread out and inaudible. The failure it replaces was the same total correction
     // delivered in bursts of hundreds, which is precisely why it could be heard.
-    int adjust = 0;
-    {
-        static uint32_t tick = 0;
-        static constexpr uint64_t TARGET = 8192;   // ~186 ms at 44100 - headroom without silly latency
-        static constexpr uint64_t HYST   = 2048;
-        if (((++tick) & 63) == 0) {
-            const uint64_t fillAfter = w - (r + have);
-            if (fillAfter > TARGET + HYST && have > 0)
-                adjust = 1;                        // running long: consume one extra, skip a frame
-            else if (fillAfter + HYST < TARGET && have > 0)
-                adjust = -1;                       // running short: repeat one frame
-            if (adjust != 0)
-                samplerInCorrections.fetch_add(1, std::memory_order_relaxed);
-        }
-    }
+    const uint64_t fillAfter = w - (r + static_cast<uint64_t>(have));
+    const int adjust = instanceAudio.drift.next(fillAfter, have);
+    if (adjust != 0)
+        samplerInCorrections.fetch_add(1, std::memory_order_relaxed);
 
     samplerInRead.store(r + have + adjust, std::memory_order_release);
 
@@ -535,20 +528,19 @@ void EnsoniqSD1AudioProcessor::pushAudioFromMame(const int16_t* pcmBuffer, int n
     // record buffer is interleaved with a stride of outputs_count(). Both are readable at runtime, so
     // the map is computed ONCE by walking the same enumerator and matching the speaker TAG - which
     // survives a driver change instead of quietly describing the previous one.
-    static int  mixStride  = 0;
-    static int  mainOffset = -1;
-    static int  indivOffset = -1;
+    auto& mixStride = instanceAudio.output.stride;
+    auto& mainOffset = instanceAudio.output.main;
+    auto& indivOffset = instanceAudio.output.indiv;
     if (mixStride == 0 && mameMachine != nullptr)
     {
-        mixStride = int(mameMachine->sound().outputs_count());
+        instanceAudio.output.begin(int(mameMachine->sound().outputs_count()));
         int first = 0;
         juce::String layout;
         for (speaker_device &spk : speaker_device_enumerator(mameMachine->root_device()))
         {
             const std::string tag = spk.tag();
             const int n = int(spk.inputs());
-            if (tag == ":speaker") mainOffset  = first;
-            if (tag == ":indiv")   indivOffset = first;
+            instanceAudio.output.observe(tag, first, n);
             layout += juce::String(tag) + "@" + juce::String(first) + "x" + juce::String(n) + "  ";
             first += n;
         }
@@ -556,7 +548,7 @@ void EnsoniqSD1AudioProcessor::pushAudioFromMame(const int16_t* pcmBuffer, int n
                               mixStride, mainOffset, indivOffset, layout.toRawUTF8());
     }
 
-    if (mixStride > 0 && mainOffset >= 0)
+    if (instanceAudio.output.hasMain())
     {
     for (int i = 0; i < numSamples; ++i) {
 
@@ -570,7 +562,7 @@ void EnsoniqSD1AudioProcessor::pushAudioFromMame(const int16_t* pcmBuffer, int n
                 // which channel it occupies. Measured: enable_sound(false) does NOT remove it, because
                 // floppy_image_device::device_add_mconfig creates the speaker unconditionally. Deriving
                 // the map is what caught that; a hardcoded stride would have shifted every channel.
-                if (indivOffset >= 0)
+                if (instanceAudio.output.hasIndividuals())
                     for (int c = 0; c < INDIV_OUTS; ++c)
                         ringBufferIndiv[c][index] = pcmBuffer[i * mixStride + indivOffset + c] / 32768.0f;
 
@@ -3532,6 +3524,8 @@ void EnsoniqSD1AudioProcessor::mameOutputNotifier(const char *outname, s32 value
 
 void EnsoniqSD1AudioProcessor::runMameEngine()
 {
+    // This state belongs only to the newly started MAME worker.
+    instanceAudio.reset();
 #ifdef _WIN32
     DWORD taskIndex = 0;
     HANDLE hTask = AvSetMmThreadCharacteristicsA("Pro Audio", &taskIndex);

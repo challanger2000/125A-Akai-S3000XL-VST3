@@ -41,6 +41,7 @@
 #include <memory>
 #include "AkaiWavInput.h"
 #include "AkaiCaptureAutomation.h"
+#include "AkaiInstanceAudioState.h"
 
 //==============================================================================
 
@@ -478,6 +479,7 @@ private:
     
     bool extractLegacyMameState(const juce::String& base64State, juce::MemoryBlock& outOsram, juce::MemoryBlock& outSeqram);
     std::thread mameThread;
+    akai::runtime::AudioState instanceAudio; // MAME-owner-thread-only state
     std::atomic<bool> isMameRunning{ false };
 
     std::atomic<uint64_t> totalRead{ 0 };
