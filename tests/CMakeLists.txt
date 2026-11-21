@@ -46,3 +46,8 @@ add_test(NAME akai_original_sds_boot_gate_contract COMMAND akai_sds_boot_gate_te
 add_executable(akai_sds_project_recall_guard_tests AkaiSdsStateGuardTests.cpp)
 target_compile_features(akai_sds_project_recall_guard_tests PRIVATE cxx_std_20)
 add_test(NAME akai_sds_project_recall_guard_contract COMMAND akai_sds_project_recall_guard_tests)
+
+# P037: real WAV decode -> original Akai MIDI SDS -> independent PCM round trip
+add_executable(akai_wav_to_sds_e2e_contract_tests AkaiWavToSdsE2ETests.cpp)
+target_compile_features(akai_wav_to_sds_e2e_contract_tests PRIVATE cxx_std_20)
+add_test(NAME akai_original_wav_to_sds_e2e_contract COMMAND akai_wav_to_sds_e2e_contract_tests)
