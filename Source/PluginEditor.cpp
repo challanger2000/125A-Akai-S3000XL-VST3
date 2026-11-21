@@ -484,11 +484,14 @@ void EnsoniqSD1AudioProcessorEditor::timerCallback()
     // P030: MIDI SDS transport state is not a sample/program success receipt.
     // The original firmware alone may confirm actual keygroup assignment.
     const int sdsStage=audioProcessor.originalSdsStage.load(std::memory_order_acquire);
-    if(sdsStage>=1 && sdsStage<=4) {
+    if(sdsStage>=1 && sdsStage<=7) {
         if(sdsStage==1) loadMediaButton.setButtonText("SDS READY");
         if(sdsStage==2) loadMediaButton.setButtonText("SDS SEND");
         if(sdsStage==3) loadMediaButton.setButtonText("SDS SENT");
         if(sdsStage==4) loadMediaButton.setButtonText("SDS ERROR");
+        if(sdsStage==5) loadMediaButton.setButtonText("SDS MAP");
+        if(sdsStage==6) loadMediaButton.setButtonText("SDS MAP OK");
+        if(sdsStage==7) loadMediaButton.setButtonText("SDS MAP FAIL");
     }
     // P004 display only original firmware-verified recording phases.
     // GUI timer never advances the firmware or presses hardware controls.
@@ -1541,6 +1544,9 @@ void EnsoniqSD1AudioProcessorEditor::loadMediaButtonClicked()
     if(sdsStage==2) m.addSectionHeader("SDS transfer through original UART");
     if(sdsStage==3) m.addSectionHeader("SDS sent - program mapping not verified");
     if(sdsStage==4) m.addSectionHeader("SDS transfer failed");
+    if(sdsStage==5) m.addSectionHeader("Original Akai keygroup assignment in progress");
+    if(sdsStage==6) m.addSectionHeader("Original Akai LCD confirms MIDI 99 in keygroup 1");
+    if(sdsStage==7) m.addSectionHeader("Original Akai firmware did not confirm the keygroup");
     const auto captureStage=static_cast<akai::capture::Stage>(
         audioProcessor.autoCaptureStage.load(std::memory_order_acquire));
     const bool captureActive=akai::capture::isRunningStage(captureStage);
