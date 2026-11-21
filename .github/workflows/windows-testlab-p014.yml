@@ -94,10 +94,22 @@ jobs:
           python test-lab/tests/run_universal_qa.py --plugin $bad[0].FullName --gui-host $gui[0].FullName --audio-host $audio[0].FullName --stress-host $stress[0].FullName --run-technical-baseline --timeout 110 --out results/fixture-bad
           $negativeCode=$LASTEXITCODE
           $negative=Get-Content results/fixture-bad/UNIVERSAL-QA-RESULT.json -Raw | ConvertFrom-Json
-          if($negativeCode -ne 1 -or $negative.status -ne 'FAIL' -or $negative.release_approved -ne $false) {
-            throw 'Test Lab failed to reject the deliberately defective state VST3'
+          # P74 propagates native playback/save failure through onboarding.
+          # The top-level "discovery NOT RUN" is a CONSEQUENCE; it is not
+          # itself evidence that a state regression was detected. Demand
+          # the actual independent P32 failure details from the real host.
+          $p32=Get-Content results/fixture-bad/discovery/technical-baseline/native/P32/ADAPTER-RESULT.json -Raw | ConvertFrom-Json
+          $stateFaults=@($p32.cases | ForEach-Object { @($_.faults) } | Where-Object { $_ -match 'save_failures: expected eq 0, observed 100' })
+          if($negativeCode -ne 1 -or $negative.status -ne 'FAIL' -or
+             $negative.release_approved -ne $false -or $p32.status -ne 'FAIL' -or
+             $stateFaults.Count -lt 6) {
+            throw 'Test Lab did not prove native save-state mutant rejection in all six playback profiles'
           }
-          Write-Host 'P014_INDEPENDENT_TEST_LAB_MUTANT=REJECTED'
+          Write-Host 'P014_INDEPENDENT_TEST_LAB_NATIVE_STATE_MUTANT=REJECTED_PROVEN'
+          # The negative native child intentionally returned 1. PowerShell
+          # otherwise inherits that as the GitHub step exit code despite
+          # successfully checking the expected negative result.
+          exit 0
       - name: Real Akai ROM-free native Test Lab P74 inventory and technical baseline
         id: real_product
         continue-on-error: true
