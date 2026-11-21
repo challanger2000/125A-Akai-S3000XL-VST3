@@ -71,9 +71,9 @@ static std::vector<std::uint8_t> unpackMidi(
     std::size_t lastNote=0;
     for(std::size_t packet=0;packet<=expectedPackets;++packet) {
         const auto delta=readVlq(midi,p);
-        const auto expected=packet==0?0u:packet==1?10u:
-            (packet-1u)%64u==0?2500u:0u;
-        if(delta!=expected)throw std::runtime_error("Wrong grouped original UART pacing");
+        const auto expected=packet==0?0u:42u;
+        if(delta!=expected)throw std::runtime_error(
+            "Original V2.0 Akai SDS requires 42 ticks between EVERY packet");
         if(midi[p++]!=0xf0)throw std::runtime_error("MIDI SDS SysEx event missing");
         const auto bytes=readVlq(midi,p);
         if(bytes!=(packet?126u:20u) || p+bytes>midi.size())
@@ -148,7 +148,12 @@ int main() {
     CHECK(recovered==dump.sysex);
     const auto originalAfterSds=decodeSdsPcm(recovered,frames);
     CHECK(originalAfterSds==original); // lossless 16-bit PCM at native 44.1k
-    CHECK(akai::sds::timedMidiTransferMillis(dump)>40000);
+    // Owner-original-ROM negative control: 64 packets in a single event
+    // were falsely accepted at >40k frames but failed to produce a playable
+    // TEST PROGRAM at EXACTLY 44100 frames. The real firmware accepted
+    // this entire one-second sample with 42 ticks per original SDS packet.
+    CHECK(akai::sds::timedMidiTransferMillis(dump)>49000 &&
+          akai::sds::timedMidiTransferMillis(dump)<52000);
 
     // Adversarial user input: true 48kHz stereo, audible left/right with
     // opposite polarity. The original Akai mono SDS path explicitly downmixes
