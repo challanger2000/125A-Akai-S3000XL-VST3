@@ -225,7 +225,13 @@ int main(){
     r=c.step(at("PROGRAM EDIT"),1571);
     ck(r.stage==Stage::WaitKeygroups && r.command==Command::Release,
        "release_keygroups_softkey");
-    r=c.step(at("KEYGROUPS KEYGROUPS IN PROGRAM: 1 active keygroup number: 1 SMPL TEST PROGRAM"),1600);
+    ck(originalKeygroupsPage("KEYGROUPS Keygroups in Program:   1  (+ -) active Keygroup number:  1 Edit: ONE TEST PROGRAM SMPL"),
+       "native_fixed_width_keygroups_spaces_detected");
+    ck(!originalKeygroupsPage("KEYGROUPS Keygroups in Program:  2 active Keygroup number: 1 TEST PROGRAM SMPL"),
+       "multi_keygroup_not_mistaken_for_default");
+    ck(!originalKeygroupsPage("KEYGROUPS Keygroups in Program:  1 active Keygroup number: 10 TEST PROGRAM SMPL"),
+       "keygroup_ten_not_mistaken_for_one");
+    r=c.step(at("KEYGROUPS Keygroups in Program:   1  (+ -) active Keygroup number:  1 Edit: ONE SMPL TEST PROGRAM"),1600);
     ck(r.stage==Stage::PressSamplePage && r.command==Command::Press
        && r.button==Button::SamplePageF6,"original_f6_enters_sample_assignment");
     r=c.step(at("KEYGROUPS"),1721);
