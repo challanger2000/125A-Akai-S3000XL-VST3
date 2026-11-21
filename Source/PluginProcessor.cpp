@@ -76,6 +76,7 @@
 #include "imagedev/midiin.h" // P030 actual original Akai UART input-image, not RAM access
 #include "AkaiSdsAssignment.h" // P031 original LCD keygroup verification
 #include "AkaiSdsBootGate.h" // P035 original firmware boot before MIDI SDS
+#include "AkaiSdsStateGuard.h" // P036 no DAW recall snapshot mid SDS
 
 #include <iomanip>
 #include <fstream>
@@ -3260,6 +3261,17 @@ void EnsoniqSD1AudioProcessor::getStateInformation (juce::MemoryBlock& destData)
         xml->setAttribute("is_cart_loaded", isCartLoaded.load());
     }
 
+    // P036: NEVER let a host autosave serialize an Akai MIDI Sample Dump
+    // while the original firmware is receiving it or still selecting the
+    // target keygroup. A valid original MAME .sta is only complete once the
+    // original LCD has confirmed MIDI 99 in zone one.
+    const int sdsImportStage=originalSdsStage.load(std::memory_order_acquire);
+    const bool sdsStateUnsafe=
+        akai::sds::requiresOriginalFirmwareWarning(sdsImportStage);
+    if(sdsStateUnsafe) {
+        xml->setAttribute("akai_native_sds_transfer_incomplete",true);
+        xml->setAttribute("akai_native_sds_stage_at_save",sdsImportStage);
+    }
     // P017: capture the full original-MAME machine state, including Akai
     // sample RAM, DSP and CPU registers, not merely old Ensoniq NVRAM.
     // MAME owner thread performs the operation. This host callback never
@@ -3275,7 +3287,9 @@ void EnsoniqSD1AudioProcessor::getStateInformation (juce::MemoryBlock& destData)
         if(unresolved) {
             machineBytes.append(unresolved->data(),unresolved->size());
             haveMachine=true;
-        } else if(isMameRunningFlag() && mameIsFullyBooted.load(std::memory_order_acquire)) {
+        } else if(!sdsStateUnsafe &&
+                  isMameRunningFlag() &&
+                  mameIsFullyBooted.load(std::memory_order_acquire)) {
             const auto seq=nativeSnapshotRequested.fetch_add(
                 1,std::memory_order_acq_rel)+1;
             nativeSnapshotEvent.reset();
@@ -3304,7 +3318,7 @@ void EnsoniqSD1AudioProcessor::getStateInformation (juce::MemoryBlock& destData)
             }
         }
         std::vector<std::uint8_t> envelope;
-        if(haveMachine && akai::machine_state::encode(
+        if(!sdsStateUnsafe && haveMachine && akai::machine_state::encode(
             std::span<const std::uint8_t>(
                 static_cast<const std::uint8_t*>(machineBytes.getData()),
                 machineBytes.getSize()),envelope)) {
