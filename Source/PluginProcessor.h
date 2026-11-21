@@ -346,13 +346,9 @@ public:
     static constexpr int SAMPLER_IN_CHANNELS = 2;
     void pushAudioToMame(const juce::AudioBuffer<float>& buffer, int numInputChannels, int numSamples);
     int  pullAudioForMame(int16_t* dest, int frames);
-    // WAV is decoded and converted on the UI/control thread, then streamed
-    // through the MAME microphone/A-D path only AFTER original firmware GO.
-    // Double-buffered immutable assets; no locks/allocations on MAME/audio threads.
-    bool stageWavForCapture(const juce::File& file, juce::String& error);
-    // P030: offline WAV -> genuine MIDI SDS file, then only the original
-    // Akai UART and firmware allocates/writes sample RAM. No A/D fake recording.
-    bool stageWavForOriginalSds(const juce::File& file, juce::String& error);
+    // P046: External WAV-file imports intentionally removed. Keep legacy
+    // state counters only for compatibility/fail-closed recall; their
+    // import-request flags are never set by the editor or public API.
     std::atomic<bool> originalSdsRequested{false};
     std::atomic<int> originalSdsStage{0}; // 0 idle, 1 staged, 2 original UART, 3 transferred, 4 error
     std::atomic<bool> originalSdsRecallRejected{false}; // DAW loaded a partial SDS state; report once in UI
