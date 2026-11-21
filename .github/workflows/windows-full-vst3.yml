@@ -2,7 +2,7 @@ name: 125A Akai - full Windows VST3 ROM-free build
 on:
   workflow_dispatch:
   push:
-    branches: [ 'develop/**' ]
+    branches: [ 'develop/**', 'feature/p017-**' ]
     paths:
       - 'CMakeLists.txt'
       - 'Source/**'

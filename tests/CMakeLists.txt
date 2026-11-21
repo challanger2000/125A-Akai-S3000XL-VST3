@@ -16,6 +16,9 @@ add_test(NAME akai_capture_controller_contract COMMAND akai_capture_controller_t
 add_executable(akai_wav_capture_lifecycle_tests AkaiWavCaptureStateTests.cpp)
 target_compile_features(akai_wav_capture_lifecycle_tests PRIVATE cxx_std_20)
 add_test(NAME akai_wav_capture_lifecycle_contract COMMAND akai_wav_capture_lifecycle_tests)
+add_executable(akai_machine_state_envelope_tests AkaiMachineStateTests.cpp)
+target_compile_features(akai_machine_state_envelope_tests PRIVATE cxx_std_20)
+add_test(NAME akai_machine_state_envelope_contract COMMAND akai_machine_state_envelope_tests)
 
 # P012 — independent machine routing, PCM bounds and input drift cadence
 find_package(Threads REQUIRED)
@@ -23,3 +26,38 @@ add_executable(akai_instance_audio_state_tests AkaiInstanceAudioStateTests.cpp)
 target_compile_features(akai_instance_audio_state_tests PRIVATE cxx_std_20)
 target_link_libraries(akai_instance_audio_state_tests PRIVATE Threads::Threads)
 add_test(NAME akai_instance_audio_state_contract COMMAND akai_instance_audio_state_tests)
+
+# P030: original Akai S3000XL firmware standard MIDI SDS wire encoding
+add_executable(akai_original_sds_tests AkaiMidiSampleDumpTests.cpp)
+target_compile_features(akai_original_sds_tests PRIVATE cxx_std_20)
+add_test(NAME akai_original_midi_sds_contract COMMAND akai_original_sds_tests)
+
+# P031: fail-closed original firmware LCD and hardware encoder assignment
+add_executable(akai_sds_assignment_tests AkaiSdsAssignmentTests.cpp)
+target_compile_features(akai_sds_assignment_tests PRIVATE cxx_std_20)
+add_test(NAME akai_original_sds_keygroup_contract COMMAND akai_sds_assignment_tests)
+
+# P035: original S3000XL ROM boot readiness and genuine F8 SKIP gate
+add_executable(akai_sds_boot_gate_tests AkaiSdsBootGateTests.cpp)
+target_compile_features(akai_sds_boot_gate_tests PRIVATE cxx_std_20)
+add_test(NAME akai_original_sds_boot_gate_contract COMMAND akai_sds_boot_gate_tests)
+
+# P036: fail-closed DAW host-state policy during firmware MIDI SDS / keygroup work
+add_executable(akai_sds_project_recall_guard_tests AkaiSdsStateGuardTests.cpp)
+target_compile_features(akai_sds_project_recall_guard_tests PRIVATE cxx_std_20)
+add_test(NAME akai_sds_project_recall_guard_contract COMMAND akai_sds_project_recall_guard_tests)
+
+# P037: real WAV decode -> original Akai MIDI SDS -> independent PCM round trip
+add_executable(akai_wav_to_sds_e2e_contract_tests AkaiWavToSdsE2ETests.cpp)
+target_compile_features(akai_wav_to_sds_e2e_contract_tests PRIVATE cxx_std_20)
+add_test(NAME akai_original_wav_to_sds_e2e_contract COMMAND akai_wav_to_sds_e2e_contract_tests)
+
+# P042: MIDI image loading cannot silently fall back to a fake live port
+add_executable(akai_midi_port_fail_closed_tests AkaiMidiPortGuardTests.cpp)
+target_compile_features(akai_midi_port_fail_closed_tests PRIVATE cxx_std_20)
+add_test(NAME akai_midi_image_fail_closed_contract COMMAND akai_midi_port_fail_closed_tests)
+
+# P044: original MAME m_last_dial must match host's physical :DATAENTRY on recall
+add_executable(akai_dial_recall_tests AkaiDialRecallTests.cpp)
+target_compile_features(akai_dial_recall_tests PRIVATE cxx_std_20)
+add_test(NAME akai_native_dial_recall_contract COMMAND akai_dial_recall_tests)
