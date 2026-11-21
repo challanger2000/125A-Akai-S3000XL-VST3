@@ -29,3 +29,17 @@ On two brand-new native MAME processes, set the genuine external original Akai `
 3. Full real native Windows owner DAW/Studio Pro project save/reopen, timing/pacing and multiple instances. No original ROMs or private state uploaded to public CI.
 
 Until these complete: **P044 Windows VST3 implementation is a CANDIDATE; product RELEASE NO-GO**.
+
+
+## 2026-11-21 — Exact P044 Windows x64 compilation and host QA (ROM-free): PASS
+
+**Compiled P044 source:** `f8f308dd57e44a5a51814376fe035ff33c0d9721`, [full Windows GitHub run #44945354847](https://github.com/challanger2000/125A-Akai-S3000XL-VST3/actions/runs/44945354847), **completed/success**. This run built the genuine Windows MSVC x64 MAME/JUCE VST3, validated `moduleinfo.json`, and exercised the exact loaded VST3 through official Steinberg and pinned 125A tester. The current development branch later added documentation only (`0de4efe`), not a new plugin binary.
+
+**Verified published ROM-free logs:**
+- Official Steinberg Validator **47 passed / 0 failed** (actual validator text).
+- 125A Plugin Tester v0.3.2 **55 PASS / 0 WARNING / 0 FAIL** with 5 editor create/attach/detach cycles, 50 successful supported fresh processing profiles, 5 reload lifecycles, 50 accepted setup rate/block combinations and a fresh instance accepting/saving controller state. 64-bit processing was not advertised. The tester's generic `RELEASE: PASS` footer is **NOT an owner-ROM release approval**.
+- The plugin compiled and linked without licensed ROMs. This confirms **source/build API correctness**, not firmware boot, sample-dependent audible WAV import, native project recall or graphical control correctness on the owner's machine.
+
+**Local private owner-only candidate assembly, NOT distributed:** Source diagnostic artifact ID `14723943289` from the exact run was combined OFF GITHUB with the owner's SHA256-verified original V2.0 firmware and HD61830 ROM. Original PE module bytes were preserved unchanged; the established `125AAKAIS3KV2ROM` footer, ROM lengths/digests, strict moduleinfo, ZIP CRC, every bundled content SHA and full roundtrip ZIP unpack were checked. Resulting private candidate SHA256 `a736a5bd385a43ae20f93181e7bb1f0f84f56d66a8729e5cf218e201f0e55a8e`; internal ROM-bearing module SHA256 `e4ca5b960c0f72302ddfe08e68f811dfe05ac24db81ec355a777ed04fc2acbc9`. This is **packaging integrity**, not a Windows owner-ROM functional test. Never upload owner firmware or private binary to public GitHub or public CI.
+
+**Still unverified and blocking FINAL:** real ROM-embedded Windows VST3 boot, one-step A/nonzero and B/zero WAV import through the *actual VST3 GUI*, source-sensitive MIDI PCM, save/close/reopen sample-specific PCM, serial dial state while automation changes during native snapshot, multiple host instances, and final Studio Pro acceptance. The private package must remain an internal **development candidate**, not be delivered as a complete instrument.
