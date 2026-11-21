@@ -482,7 +482,13 @@ void EnsoniqSD1AudioProcessor::pushAudioFromMame(const int16_t* pcmBuffer, int n
             
                         // --- DEADLOCK BREAKER ---
 
-                        if (requestMameSave.load(std::memory_order_acquire) || requestMameLoad.load(std::memory_order_acquire)) {
+                        if (requestMameSave.load(std::memory_order_acquire)
+                            || requestMameLoad.load(std::memory_order_acquire)
+                            || nativeRestoreRequested.load(std::memory_order_acquire)
+                            || nativeSnapshotRequested.load(std::memory_order_acquire)
+                               != nativeSnapshotFinished.load(std::memory_order_acquire)) {
+                            // P017: a throttled native MAME sink must not block
+                            // the only owner thread that can execute state I/O.
                             break;
                         }
                         
@@ -2954,23 +2960,10 @@ void EnsoniqSD1AudioProcessor::getStateInformation (juce::MemoryBlock& destData)
         }
     }
 
-    // --- 4. DIRECT RAM EXTRACTION (Version Independent) ---
-        if (isMameRunningFlag() && mameMachine != nullptr) {
-            
-            // Request the memory block pointers directly from MAME
-            auto* osram_share = mameMachine->root_device().memshare("osram");
-            auto* seqram_share = mameMachine->root_device().memshare("seqram");
-
-            if (osram_share != nullptr) {
-                juce::MemoryBlock osBlock(osram_share->ptr(), osram_share->bytes());
-                xml->setAttribute("ram_osram", osBlock.toBase64Encoding());
-            }
-            
-            if (seqram_share != nullptr) {
-                juce::MemoryBlock seqBlock(seqram_share->ptr(), seqram_share->bytes());
-                xml->setAttribute("ram_seqram", seqBlock.toBase64Encoding());
-            }
-        }
+    // P017: do not access MAME-owned raw shares from the DAW thread.
+    // The complete native .sta envelope above replaces the old partial
+    // OSRAM/SEQRAM snapshot for NEW songs. Existing legacy XML projects
+    // remain readable by the backward-compatible load branch below.
     
     // --- 4.5 FLUSH ACTIVE UI STATE ---
         if (auto* editor = dynamic_cast<EnsoniqSD1AudioProcessorEditor*>(getActiveEditor())) {
@@ -3109,7 +3102,8 @@ void EnsoniqSD1AudioProcessor::setStateInformation (const void* data, int sizeIn
                 }
 
                 // --- 4. RAM INJECTION BRANCHING ---
-                if (savedVersion == "0.9.7" && xmlState->hasAttribute("mame_state")) {
+                if (!hasNative && savedVersion == "0.9.7"
+                    && xmlState->hasAttribute("mame_state")) {
                     
                     juce::String b64String = xmlState->getStringAttribute("mame_state");
 
