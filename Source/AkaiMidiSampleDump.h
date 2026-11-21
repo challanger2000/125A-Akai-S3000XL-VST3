@@ -63,6 +63,59 @@ inline Dump encodeMono(std::span<const std::int16_t> mono,std::uint32_t rate,
  if(out.sysex.size()!=bytes)throw std::logic_error("SDS payload error");
  return out;
 }
+// P032: Convert one authentic SDS dump into a Standard MIDI File.
+// MAME's native .syx parser inserts 100ms silence after each SysEx packet.
+// The real owner-ROM accepts 42 MIDI ticks between packets: 43.75ms at
+// 500000us/quarter, safely above the 40.64ms wire time for 127 bytes.
+// Crucially this prevents MAME midiin's 131072-byte TX ring from flooding
+// for ordinary WAVs that would exceed it if all packets shared tick zero.
+inline std::vector<std::uint8_t> toTimedMidiFile(const Dump& dump) {
+ const auto expected=21u+127u*dump.packets();
+ if(dump.frames==0 || dump.sysex.size()!=expected)
+  throw std::invalid_argument("Incomplete original Akai SDS dump");
+ std::vector<std::uint8_t> track;
+ track.reserve(expected+5u*dump.packets()+12u);
+ const auto tempo=std::array<std::uint8_t,7>{0,0xff,0x51,0x03,0x07,0xa1,0x20};
+ track.insert(track.end(),tempo.begin(),tempo.end());
+ const auto append=[&](std::uint8_t b){track.push_back(b);};
+ const auto length=[&](std::uint32_t n){
+  std::array<std::uint8_t,5> digits{};
+  int cnt=0;
+  digits[size_t(cnt++)]=std::uint8_t(n&127);
+  for(n>>=7;n;n>>=7)digits[size_t(cnt++)]=std::uint8_t((n&127)|128);
+  while(cnt)append(digits[size_t(--cnt)]);
+ };
+ std::size_t offset=0;
+ for(std::size_t i=0;i<=dump.packets();++i){
+  const auto bytes=std::size_t(i==0?21:127);
+  if(offset+bytes>dump.sysex.size() ||
+     dump.sysex[offset]!=0xf0 || dump.sysex[offset+bytes-1]!=0xf7)
+   throw std::invalid_argument("Malformed original Akai SDS SysEx boundary");
+  length(std::uint32_t(i==0?0:42)); // MIDI ticks, not milliseconds
+  append(0xf0);
+  length(std::uint32_t(bytes-1)); // includes trailing F7 per SMF SysEx
+  track.insert(track.end(),dump.sysex.begin()+std::ptrdiff_t(offset+1),
+               dump.sysex.begin()+std::ptrdiff_t(offset+bytes));
+  offset+=bytes;
+ }
+ track.insert(track.end(),{0,0xff,0x2f,0}); // End Of Track
+ if(track.size()>0xffffffffull)
+  throw std::invalid_argument("MIDI Sample Dump file too large");
+ std::vector<std::uint8_t> out={
+   'M','T','h','d',0,0,0,6,0,0,0,1,1,0xe0,
+   'M','T','r','k'
+ };
+ const auto n=std::uint32_t(track.size());
+ for(int shift=24;shift>=0;shift-=8)out.push_back(std::uint8_t(n>>shift));
+ out.insert(out.end(),track.begin(),track.end());
+ return out;
+}
+inline std::uint64_t timedMidiTransferMillis(const Dump& dump)noexcept {
+ // Each packet occupies 42 ticks at 480 PPQN and 500000us/QN.
+ // Approximate emulated time only. Never substitutes for Akai LCD proof.
+ return (std::uint64_t(dump.packets())*42u*500u+479u)/480u
+       +1500u;
+}
 // Explicitly MONO conversion: MIDI SDS is one Akai mono sample.
 // Stereo requires TWO samples and two separately panned original zones.
 inline Dump encodeStereoAsMono(std::span<const std::int16_t> stereo,
