@@ -73,13 +73,13 @@ int main(){
        && midiFile[17]=='k');
  CHECK(midiFile[22]==0 && midiFile[23]==0xff && midiFile[24]==0x51);
  CHECK(midiFile[29]==0 && midiFile[30]==0xf0 && midiFile[31]==20);
- CHECK(midiFile[52]==10 && midiFile[53]==0xf0 && midiFile[54]==126);
+ CHECK(midiFile[52]==42 && midiFile[53]==0xf0 && midiFile[54]==126);
  CHECK(midiFile.back()==0 && midiFile[midiFile.size()-4]==0);
  CHECK(midiFile[midiFile.size()-3]==0xff);
  CHECK(midiFile[midiFile.size()-2]==0x2f);
  CHECK(timedMidiTransferMillis(owner)>2000 && timedMidiTransferMillis(owner)<3000);
- // 65 real data packets: 64 share one UART event, the next one MUST
- // be delayed at least 2500 MIDI ticks to protect 131072-byte MAME TX ring.
+ // P038: 65 consecutive packets must be spaced by 42 MIDI ticks EACH.
+ // The former 64-burst shape failed at 44100 frames in the original firmware.
  const auto many=encodeMono(std::vector<std::int16_t>(65*40,15000),44100,99,0);
  const auto grouped=toTimedMidiFile(many);
  std::size_t cursor=22; // standard MIDI file 14-byte header + 8-byte MTrk
@@ -99,7 +99,7 @@ int main(){
  std::size_t originalOffset=0;
  for(std::size_t p=0;p<66;++p) {
   const auto delta=readVlq();
-  CHECK(delta==(p==0?0u:p==1?10u:p==65?2500u:0u));
+  CHECK(delta==(p==0?0u:42u));
   CHECK(grouped[cursor++]==0xf0);
   const auto length=readVlq();
   const auto bytes=std::size_t(p==0?21:127);
@@ -112,8 +112,8 @@ int main(){
  CHECK(grouped[cursor]==0 && grouped[cursor+1]==0xff
        && grouped[cursor+2]==0x2f && grouped[cursor+3]==0);
  CHECK(cursor+4==grouped.size() && originalOffset==many.sysex.size());
- CHECK(timedMidiTransferMillis(many)>2700 &&
-       timedMidiTransferMillis(many)<5000);
+ CHECK(timedMidiTransferMillis(many)>4300 &&
+       timedMidiTransferMillis(many)<4600);
  Dump broken=owner;broken.sysex.pop_back();
  CHECK(bad([&]{toTimedMidiFile(broken);}));
  std::cout<<"P030_P032_AKAI_SDS_PACKET_AND_FAST_TIMED_MIDI_WIRE=PASS\n";
