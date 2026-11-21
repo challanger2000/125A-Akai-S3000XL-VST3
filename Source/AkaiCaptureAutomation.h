@@ -9,13 +9,18 @@
 #include <string_view>
 
 namespace akai::capture {
-enum class Button: unsigned char { None, Sample, RecF2, ArmF8, GoF7 };
+enum class Button: unsigned char {
+    None, Sample, RecF2, ArmF8, GoF7, Name, Enter,
+    Digit0, Digit1, Digit2, Digit3, Digit4, Digit5, Digit6, Digit7, Digit8, Digit9
+};
 enum class Command: unsigned char { None, Press, Release };
 enum class Stage: int {
     Idle=0, WaitWav=1, PressSample=2, WaitSetup=3,
     PressRec=4, WaitNewSample=5, PressArm=6, WaitArmed=7,
     PressGo=8, WaitRecording=9, Capturing=10,
     WaitStop=11, RecordedSample=12,
+    PressName=13, PressNumericMode=14, TypeName=15,
+    ConfirmName=16, WaitNamed=17,
     NeedNewSample=20, NoReadableLcd=21, OverwriteRisk=22,
     TimedOut=23, Busy=24, Cancelled=25,
     SourceUnavailable=26, SampleTruncated=27
@@ -61,10 +66,28 @@ inline bool overwriteWarning(std::string_view text) noexcept {
     return contains(text,"OVERWRITE") || contains(text,"EXISTS!")
         || contains(text,"REPLACE EXISTING") || contains(text,"DELETE");
 }
+constexpr bool isRunningStage(Stage s) noexcept {
+    return (s>=Stage::WaitWav && s<=Stage::WaitStop)
+        || (s>=Stage::PressName && s<=Stage::WaitNamed);
+}
+constexpr Button numericButton(char digit) noexcept {
+    switch(digit){
+    case '0':return Button::Digit0;case '1':return Button::Digit1;
+    case '2':return Button::Digit2;case '3':return Button::Digit3;
+    case '4':return Button::Digit4;case '5':return Button::Digit5;
+    case '6':return Button::Digit6;case '7':return Button::Digit7;
+    case '8':return Button::Digit8;case '9':return Button::Digit9;
+    default:return Button::None;
+    }
+}
 class Controller {
 public:
     bool start(std::uint64_t ms) noexcept {
         if (isRunning()) return false;
+        if(nextName_>=999999999u)return false; // never re-use a known generated name
+        nameSequence_=++nextName_;
+        nameIndex_=0;
+        nameRetries_=0;
         stage_=Stage::WaitWav; enteredMs_=ms; held_=Button::None;
         return true;
     }
@@ -75,7 +98,7 @@ public:
                 released,stage_};
     }
     bool isRunning() const noexcept {
-        return stage_>=Stage::WaitWav && stage_<=Stage::WaitStop;
+        return isRunningStage(stage_);
     }
     Stage stage()const noexcept{return stage_;}
     // Called only by MAME owner thread with emulated milliseconds.
@@ -92,7 +115,8 @@ public:
         // silence just because the UI still displays an old filename.
         if ((stage_==Stage::PressSample || stage_==Stage::WaitSetup ||
              stage_==Stage::PressRec || stage_==Stage::WaitNewSample ||
-             stage_==Stage::PressArm || stage_==Stage::WaitArmed) &&
+             stage_==Stage::PressArm || stage_==Stage::WaitArmed ||
+             (stage_>=Stage::PressName && stage_<=Stage::WaitNamed)) &&
              !o.wavReady)
             return finish(Stage::SourceUnavailable);
         if(ms>=enteredMs_ && ms-enteredMs_>timeoutForStage())
@@ -109,6 +133,12 @@ public:
                 case Stage::PressRec: transition(Stage::WaitNewSample,ms);break;
                 case Stage::PressArm: transition(Stage::WaitArmed,ms);break;
                 case Stage::PressGo: transition(Stage::WaitRecording,ms);break;
+                case Stage::PressName: transition(Stage::PressNumericMode,ms);break;
+                case Stage::PressNumericMode: transition(Stage::TypeName,ms);break;
+                case Stage::TypeName:
+                    if(++nameIndex_>=12)transition(Stage::ConfirmName,ms);
+                    break;
+                case Stage::ConfirmName: transition(Stage::WaitNamed,ms);break;
                 default:break;
                 }
                 return result(Command::Release,b);
@@ -138,6 +168,38 @@ public:
                     // Firmware explicitly says this name does not already exist.
                     transition(Stage::PressArm,ms);
                     return press(Button::ArmF8,ms);
+                }
+                // Fresh S3000XL boots with existing factory waveforms:
+                // the original REC page does NOT offer "* NEW *" by default.
+                // Enter the original panel naming dialog, do not touch guest RAM.
+                if(o.readable && contains(o.lcd,"RECORD") && ms>=enteredMs_
+                   && ms-enteredMs_>=400) {
+                    transition(Stage::PressName,ms);
+                    return press(Button::Name,ms);
+                }
+                break;
+            case Stage::PressNumericMode:
+                if(o.readable)return press(Button::Name,ms);
+                break;
+            case Stage::TypeName:
+                if(o.readable)return press(numericButton(generatedDigit(nameIndex_)),ms);
+                break;
+            case Stage::ConfirmName:
+                if(o.readable)return press(Button::Enter,ms);
+                break;
+            case Stage::WaitNamed:
+                if(o.readable && hasUniqueRecordName(o.lcd)) {
+                    transition(Stage::PressArm,ms);
+                    return press(Button::ArmF8,ms);
+                }
+                if(o.readable && contains(o.lcd,"RECORD") && ms>=enteredMs_
+                   && ms-enteredMs_>=700) {
+                    if(++nameRetries_>16 || nextName_>=999999999u)
+                        return finish(Stage::NeedNewSample);
+                    nameSequence_=++nextName_;
+                    nameIndex_=0;
+                    transition(Stage::PressName,ms);
+                    return press(Button::Name,ms);
                 }
                 break;
             case Stage::WaitArmed:
@@ -176,6 +238,21 @@ private:
     Button held_=Button::None;
     std::uint64_t enteredMs_=0;
     std::uint64_t pulseStartMs_=0;
+    std::uint32_t nextName_=0;
+    std::uint32_t nameSequence_=0;
+    unsigned nameIndex_=0, nameRetries_=0;
+    // Exactly 12 digits: prefix "125" + nine-digit serial (1..999999999).
+    // The Akai naming dialog is limited to 12 characters. Fully overwrite
+    // all positions, including any existing waveform name suffix.
+    constexpr char generatedDigit(unsigned index)const noexcept{
+        if(index==0)return '1';
+        if(index==1)return '2';
+        if(index==2)return '5';
+        if(index>=12)return '0';
+        std::uint32_t factor=1;
+        for(unsigned n=0;n<11-index;++n)factor*=10u;
+        return char('0'+((nameSequence_/factor)%10u));
+    }
     void transition(Stage next,std::uint64_t ms)noexcept{
         stage_=next;enteredMs_=ms;
     }
