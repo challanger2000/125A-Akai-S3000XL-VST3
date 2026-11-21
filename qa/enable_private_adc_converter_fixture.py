@@ -80,6 +80,11 @@ def patch(path):
             } else l = r = 0;
             m_last_l = l;
             m_last_r = r;
+            if (m_owner_fixture_pos==1 || m_owner_fixture_pos==44100
+                || m_owner_fixture_pos==88200
+                || (m_owner_fixture_pos % 176400)==0)
+                logerror("OWNER_ADC_PCM_POP count=%u time=%.6f l=%d r=%d\\n",
+                    m_owner_fixture_pos,machine().time().as_double(),int(l),int(r));
         }
 
 #if S3000_ADC_RAMP''')
