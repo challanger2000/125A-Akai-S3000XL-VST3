@@ -75,6 +75,7 @@
 #include "diimage.h"
 #include "imagedev/midiin.h" // P030 actual original Akai UART input-image, not RAM access
 #include "AkaiSdsAssignment.h" // P031 original LCD keygroup verification
+#include "AkaiSdsBootGate.h" // P035 original firmware boot before MIDI SDS
 
 #include <iomanip>
 #include <fstream>
@@ -887,6 +888,8 @@ private:
     std::uint64_t originalSdsFinishAtMs=0;
     akai::sds::Assignment originalSdsAssignment;
     int originalSdsHeldIndex=-1;
+    akai::sds::BootGate originalSdsBoot;
+    int originalSdsBootHeldIndex=-1;
     akai::machine_state::RestoreMailbox::Work nativeRestoreInFlight{}; // MAME owner only
     akai::machine_state::SnapshotBarrier nativeSnapshotInFlight{}; // MAME owner only
     
@@ -1592,6 +1595,61 @@ public:
                     ?std::uint64_t(t*1000.0):0;
                 auto* in=mame_machine->root_device().subdevice<midiin_device>(
                     "mdin:midiin:midiinimg");
+                // A powered MAME V53 motherboard is NOT a ready S3000XL OS.
+                // Original V2.0 may display its HDD-ready wait and requires
+                // the REAL F8 SKIP key. Never send SDS into that boot screen.
+                if(processor->originalSdsRequested.load(std::memory_order_acquire)
+                    && !captureController.isRunning() && !originalSdsBoot.ready()
+                    && !originalSdsBoot.active()
+                    && originalSdsBoot.phase()!=akai::sds::BootPhase::Failed)
+                    (void)originalSdsBoot.start(now);
+                if(originalSdsBoot.active()) {
+                    char lcd[321]{};
+                    auto* display=mame_machine->root_device()
+                        .subdevice<hd61830_device>("lcdc");
+                    const bool readable=display!=nullptr &&
+                        display->snapshot_visible_text(lcd,sizeof(lcd));
+                    const auto action=originalSdsBoot.step(
+                        readable?std::string_view(lcd,320):std::string_view{},
+                        readable,
+                        processor->mameIsFullyBooted.load(std::memory_order_acquire),
+                        now);
+                    if(action.action==akai::sds::BootAction::PressF8) {
+                        for(size_t index=0;index<processor->sd1Buttons.size();++index)
+                            if(processor->sd1Buttons[index].paramID=="btn_f8"
+                               && index<processor->buttonParams.size()
+                               && processor->buttonParams[index]
+                               && processor->buttonParams[index]->load(
+                                  std::memory_order_acquire)<=0.5f) {
+                                processor->buttonParams[index]->store(
+                                    1.f,std::memory_order_release);
+                                originalSdsBootHeldIndex=int(index);break;
+                            }
+                        if(originalSdsBootHeldIndex<0)
+                            (void)originalSdsBoot.fail();
+                    } else if(action.action==akai::sds::BootAction::ReleaseF8) {
+                        if(originalSdsBootHeldIndex>=0 &&
+                           originalSdsBootHeldIndex<int(processor->buttonParams.size())) {
+                            processor->buttonParams[size_t(originalSdsBootHeldIndex)]
+                                ->store(0.f,std::memory_order_release);
+                            originalSdsBootHeldIndex=-1;
+                        }
+                    }
+                    if(originalSdsBoot.phase()==akai::sds::BootPhase::Failed) {
+                        // Roll back any key this controller pressed. Never
+                        // release a key independently held by the user.
+                        if(originalSdsBootHeldIndex>=0 &&
+                           originalSdsBootHeldIndex<int(processor->buttonParams.size())) {
+                            processor->buttonParams[size_t(originalSdsBootHeldIndex)]
+                                ->store(0.f,std::memory_order_release);
+                            originalSdsBootHeldIndex=-1;
+                        }
+                        processor->originalSdsRequested.store(
+                            false,std::memory_order_release);
+                        processor->originalSdsStage.store(
+                            4,std::memory_order_release);
+                    }
+                }
                 if(originalSdsTransferActive && now>=originalSdsFinishAtMs) {
                     originalSdsTransferActive=false;
                     processor->clearMidiBuffer(); // discard stale host notes
@@ -1617,6 +1675,7 @@ public:
                 }
                 if(!originalSdsTransferActive &&
                    processor->originalSdsRequested.load(std::memory_order_acquire) &&
+                   originalSdsBoot.ready() &&
                    !captureController.isRunning() &&
                    !nativeRestoreInFlight && !nativeSnapshotInFlight.active() &&
                    !mame_machine->save_or_load_pending()) {
