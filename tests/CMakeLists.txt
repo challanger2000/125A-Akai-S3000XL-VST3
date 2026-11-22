@@ -73,3 +73,8 @@ add_executable(akai_project_cd_state_tests P051ProjectCdStateTests.cpp)
 target_compile_features(akai_project_cd_state_tests PRIVATE cxx_std_20)
 target_include_directories(akai_project_cd_state_tests PRIVATE ${CMAKE_SOURCE_DIR}/..)
 add_test(NAME akai_project_cd_identity_contract COMMAND akai_project_cd_state_tests)
+# P053: original-CD Akai SCSI device identity must survive CD eject/missing ISO
+add_executable(akai_scsi_media_plan_tests P050ScsiMediaPlan.cpp)
+target_compile_features(akai_scsi_media_plan_tests PRIVATE cxx_std_20)
+target_include_directories(akai_scsi_media_plan_tests PRIVATE ${CMAKE_SOURCE_DIR}/..)
+add_test(NAME akai_optical_savestate_device_identity COMMAND akai_scsi_media_plan_tests)

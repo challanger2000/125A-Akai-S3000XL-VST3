@@ -1,4 +1,5 @@
 #include "Source/AkaiScsiMediaPlan.h"
+#include <algorithm>
 #include <cstdlib>
 #include <iostream>
 #include <string>
@@ -29,9 +30,9 @@ int main()
         {"CD_only_nonASCII_source_path", "Akai/Bibliothek 1.iso", "",
             {"-scsi:4","","-scsi:5","cdrom_2x","-cdrm","Akai/Bibliothek 1.iso"}},
         {"no_media_prepared_hot_swap_target5", "", "",
-            {"-scsi:4","","-scsi:5","cdrom"}},
+            {"-scsi:4","","-scsi:5","cdrom_2x"}},
         {"HDD_only_original_slot5", "", "hard.chd",
-            {"-scsi:4","cdrom","-scsi:5","harddisk","-hard","hard.chd"}},
+            {"-scsi:4","cdrom_2x","-scsi:5","harddisk","-hard","hard.chd"}},
         {"HDD_plus_CD_preserve_existing_mapping", "akai.iso", "hard.chd",
             {"-scsi:4","cdrom_2x","-scsi:5","harddisk","-hard","hard.chd","-cdrm","akai.iso"}}
     };
@@ -48,6 +49,30 @@ int main()
         std::cerr << "FAIL prior broken CD-only mapping passed\n";
         return EXIT_FAILURE;
     }
-    std::cout << "P050_SCSI_MEDIA_PLAN_5_CASES_PASS_ID4_NEGATIVE_REJECTED\n";
+
+    // P053: the SAME emulated SCSI device must persist independently of
+    // medium presence. Otherwise MAME refuses the saved original-machine
+    // image and factory-only MIDI plays while CD-loaded programs disappear.
+    for (const auto& hard : {std::string(),std::string("hard.chd")}) {
+        std::vector<std::string> empty, inserted;
+        akai::appendScsiMediaArguments(empty,"",hard);
+        akai::appendScsiMediaArguments(inserted,"akai.iso",hard);
+        if (empty.size()<4 || inserted.size()<4 ||
+            !std::equal(empty.begin(),empty.begin()+4,inserted.begin()) ||
+            empty[hard.empty()?3:1]!="cdrom_2x") {
+            std::cerr << "FAIL P053 optical-device changes on eject or missing ISO\n";
+            return EXIT_FAILURE;
+        }
+    }
+    // Deliberate negative: the previous P050 no-disc plain-cdrom mapping
+    // violates this requirement, even though it booted normally.
+    const std::vector<std::string> oldNoDisc={"-scsi:4","","-scsi:5","cdrom"};
+    std::vector<std::string> currentNoDisc;
+    akai::appendScsiMediaArguments(currentNoDisc,"","");
+    if (currentNoDisc==oldNoDisc) {
+        std::cerr << "FAIL P053 old changing-CD-device regression survived\n";
+        return EXIT_FAILURE;
+    }
+    std::cout << "P053_SCSI_DEVICE_IDENTITY_CD_ONLY_HDD_CD_PASS_P050_NEGATIVE_REJECTED\\n";
     return EXIT_SUCCESS;
 }
