@@ -18,7 +18,7 @@ def valid(patch: str) -> bool:
     if patch.count(MARK) != 1:
         return False
     chunk = patch.split(MARK, 1)[1]
-    if "\ndiff --git " in chunk or chunk.count("@@ ") != 1:
+    if "\ndiff --git " in chunk or len(re.findall(r"(?m)^@@ ", chunk)) != 1:
         return False
     if not chunk.startswith("\n--- a/src/devices/bus/nscsi/cd.cpp\n"
                             "+++ b/src/devices/bus/nscsi/cd.cpp\n"):
