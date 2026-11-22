@@ -425,6 +425,7 @@ void EnsoniqSD1AudioProcessor::pushAudioFromMame(const int16_t* pcmBuffer, int n
                         // --- DEADLOCK BREAKER ---
 
                         if (requestMameSave.load(std::memory_order_acquire)
+                            || requestCdLoad.load(std::memory_order_acquire) // P056: wake MAME owner for optical hot-swap even when DAW audio is idle
                             || requestMameLoad.load(std::memory_order_acquire)
                             || nativeRestore.needsService()
                             || nativeSnapshotRequested.load(std::memory_order_acquire)

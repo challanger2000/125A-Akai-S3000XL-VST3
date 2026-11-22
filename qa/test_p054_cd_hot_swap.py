@@ -39,8 +39,32 @@ def valid(source):
     return True
 
 
+
+def throttle_services_cd_without_audio(source):
+    begin=source.find('void EnsoniqSD1AudioProcessor::pushAudioFromMame(')
+    end=source.find('uint64_t currentWritePos = totalWritten',begin)
+    if begin < 0 or end < begin:
+        return False
+    body=source[begin:end]
+    guard_begin=body.find('if (requestMameSave.load(std::memory_order_acquire)')
+    guard_end=body.find('// --- ANCHOR DEADLOCK BREAKER ---',guard_begin)
+    if guard_begin < 0 or guard_end < guard_begin:
+        return False
+    guard=body[guard_begin:guard_end]
+    return all(part in guard for part in (
+        '|| requestCdLoad.load(std::memory_order_acquire)',
+        'nativeRestore.needsService()',
+        'break;',
+    ))
+
 def main():
     text=SOURCE.read_text(encoding='utf-8')
+    proc=Path("Source/PluginProcessor.cpp").read_text(encoding='utf-8')
+    if not throttle_services_cd_without_audio(proc):
+        raise AssertionError("P056 MAME owner can starve pending CD image load at idle DAW transport")
+    old_throttle=proc.replace('|| requestCdLoad.load(std::memory_order_acquire)', '', 1)
+    if throttle_services_cd_without_audio(old_throttle):
+        raise AssertionError("P056 original blocked-audio hot-CD mutant escaped")
     if not valid(text):
         raise AssertionError("Real editor CD insertion/eject must not reset original Akai RAM")
     # Old P053 route: ejection reboots, losing user-imported samples.
@@ -53,6 +77,8 @@ def main():
                       'p.shutdownMame();p.checkRomAndBootMame();',1)
     if valid(old2):
         raise AssertionError("P054 old CD-insert reboot mutant escaped")
+    print("P056_AUDIO_THROTTLE_SERVICES_CD_REQUEST=PASS")
+    print("P056_PRE_FIX_BLOCKED_MEDIA_MUTANT=KILLED")
     print("P054_CD_INSERT_EJECT_NO_MACHINE_RESET=PASS")
     print("P054_OLD_REBOOT_MUTANTS_REJECTED=2")
 
