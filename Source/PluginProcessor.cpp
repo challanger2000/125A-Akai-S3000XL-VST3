@@ -2326,23 +2326,18 @@ void EnsoniqSD1AudioProcessor::prepareToPlay (double sampleRate, int samplesPerB
         
         setLatencySamples(currentThreshold + hwLatency);
     
-        // Only boot MAME the very first time play is prepared
+        // Avoid consuming the one-time boot flag in a scan or validator.
+        // Otherwise a later genuine prepareToPlay() on the same instance
+        // cannot start MAME and remains at "Engine Offline" indefinitely.
+        const juce::String hostPath = juce::PluginHostType().getHostPath().toLowerCase();
+        isMaschineHost = hostPath.contains("maschine");
+        if (hostPath.contains("scanner") || hostPath.contains("validator")) {
+            isMameRunning.store(false, std::memory_order_release);
+            return;
+        }
+
+        // Only boot MAME the first time active host audio is prepared.
         if (!mameHasStarted.exchange(true)) {
-            
-                        // --- VST SCANNER PROTECTION ---
-                        // We check which process is currently running the plugin
-                        juce::String hostPath = juce::PluginHostType().getHostPath().toLowerCase();
-                        
-                        // Detect Maschine once, shared by all processBlock Maschine-specific branches
-                        isMaschineHost = hostPath.contains("maschine");
-                        
-                        // If this is a plugin scanner or validator (e.g., Cubase vstscanner.exe),
-                        // we have absolutely no intention of running MAME and writing to the file system!
-                        if (hostPath.contains("scanner") || hostPath.contains("validator")) {
-                            isMameRunning = false;
-                            return;
-                        }
-        
         initialSampleRate.store(sampleRate);
             
                         // 1. Run rigorous Self-Check
