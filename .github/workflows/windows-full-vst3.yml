@@ -46,10 +46,10 @@ jobs:
         run: |
           python qa/test_p057_native_state_header.py
           if ($LASTEXITCODE -ne 0) { throw "P057 MAME save compatibility guard invalid" }
-      - name: P061 upstream original Akai CD-ROM ID4 cold-boot contract
+      - name: P062 original firmware CD5 one-click ISO cold-boot contract
         shell: pwsh
         run: |
-          python qa/test_p061_cd4_coldboot.py
+          python qa/test_p062_firmware_cd5_coldboot.py
           if ($LASTEXITCODE -ne 0) { throw "S3000XL CD4 original cold boot media regression" }
       - name: Install MAME 0.288 build prerequisites
         uses: msys2/setup-msys2@v2
