@@ -46,11 +46,11 @@ jobs:
         run: |
           python qa/test_p057_native_state_header.py
           if ($LASTEXITCODE -ne 0) { throw "P057 MAME save compatibility guard invalid" }
-      - name: P054 original CD hot insert and eject UI routes
+      - name: P062 original firmware CD5 one-click ISO cold-boot contract
         shell: pwsh
         run: |
-          python qa/test_p054_cd_hot_swap.py
-          if ($LASTEXITCODE -ne 0) { throw "CD media unexpectedly resets original sampler RAM" }
+          python qa/test_p062_firmware_cd5_coldboot.py
+          if ($LASTEXITCODE -ne 0) { throw "S3000XL CD4 original cold boot media regression" }
       - name: Install MAME 0.288 build prerequisites
         uses: msys2/setup-msys2@v2
         with:

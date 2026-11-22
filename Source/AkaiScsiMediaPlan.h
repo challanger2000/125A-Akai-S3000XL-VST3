@@ -9,27 +9,26 @@ inline void appendScsiMediaArguments(std::vector<std::string>& args,
                                      const std::string& hardDiskImage)
 {
     const bool hasCD = !cdImage.empty();
-    const bool hasHDD = !hardDiskImage.empty();
-    if (hasHDD) {
-        // Preserve HDD at target5 and optional CD at target4.
-        // P053: optical device type is fixed across empty/loaded discs so
-        // a saved native MAME machine state can be restored without the ISO.
+    // P062: original firmware V2.0 selects SCSI ID 5 after a power cycle.
+    // The upstream Tuth CD-ROM target 4 requires manually choosing ID 4
+    // on the Akai panel. For the owner's one-click CD-only workflow, attach
+    // the 2x optical drive to the FIRMWARE-SELECTED target 5, not target 4.
+    // An image is provided via -cdrm before the MAME machine is booted,
+    // precisely as in the upstream verified startup path.
+    if (hardDiskImage.empty()) {
+        args.emplace_back("-scsi:4");
+        args.emplace_back("");         // disable the upstream CD4 slot
+        args.emplace_back("-scsi:5");
+        args.emplace_back("cdrom_2x");  // firmware default SCSI ID5
+    } else {
+        // Preserve upstream CD4 and HDD5 when a real HDD is installed.
+        // Selecting CD4 within the original firmware is a separate task.
         args.emplace_back("-scsi:4");
         args.emplace_back("cdrom_2x");
         args.emplace_back("-scsi:5");
         args.emplace_back("harddisk");
         args.emplace_back("-hard");
         args.push_back(hardDiskImage);
-    } else {
-        // Original Akai V2.0 factory drive SCSI ID5; no phantom HDD.
-        // P053: always cdrom_2x, even when ejected / original ISO missing.
-        // Exact original-ROM state with cdrom_2x fails to restore into plain
-        // cdrom (confirmed by false factory-only MIDI replay).
-        // Explicitly disable the MAME 0.288 default CD-ROM on target4.
-        args.emplace_back("-scsi:4");
-        args.emplace_back("");
-        args.emplace_back("-scsi:5");
-        args.emplace_back("cdrom_2x");
     }
     if (hasCD) {
         args.emplace_back("-cdrm");

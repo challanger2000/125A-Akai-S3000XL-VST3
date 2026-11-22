@@ -25,11 +25,11 @@ int main()
         std::vector<std::string> expected;
     };
     const Case cases[] = {
-        {"CD_only_original_Akai_drive5", "akai.iso", "",
+        {"CD_only_firmware_defaults_ID5", "akai.iso", "",
             {"-scsi:4","","-scsi:5","cdrom_2x","-cdrm","akai.iso"}},
         {"CD_only_nonASCII_source_path", "Akai/Bibliothek 1.iso", "",
             {"-scsi:4","","-scsi:5","cdrom_2x","-cdrm","Akai/Bibliothek 1.iso"}},
-        {"no_media_prepared_hot_swap_target5", "", "",
+        {"no_media_CD5_device_consistent", "", "",
             {"-scsi:4","","-scsi:5","cdrom_2x"}},
         {"HDD_only_original_slot5", "", "hard.chd",
             {"-scsi:4","cdrom_2x","-scsi:5","harddisk","-hard","hard.chd"}},
@@ -41,8 +41,9 @@ int main()
         akai::appendScsiMediaArguments(args,c.cd,c.hdd);
         if (!matches(args,c.expected,c.name)) return EXIT_FAILURE;
     }
-    // Historical target4-only setting is an intentionally rejected mutant.
-    const std::vector<std::string> old={"-scsi:4","cdrom_2x","-cdrm","akai.iso"};
+    // Reject the CD4 layout when there is no HDD: it differs from
+    // firmware default SCSI ID5 and left the LCD at DRIVE NOT READY.
+    const std::vector<std::string> old={"-scsi:4","cdrom_2x","-scsi:5","","-cdrm","akai.iso"};
     std::vector<std::string> correct;
     akai::appendScsiMediaArguments(correct,"akai.iso","");
     if (correct==old) {
@@ -73,6 +74,6 @@ int main()
         std::cerr << "FAIL P053 old changing-CD-device regression survived\n";
         return EXIT_FAILURE;
     }
-    std::cout << "P053_SCSI_DEVICE_IDENTITY_CD_ONLY_HDD_CD_PASS_P050_NEGATIVE_REJECTED\\n";
+    std::cout << "P062_CD_ID5_DEFAULT_COLD_BOOT_HDD_OPTIONAL_CD4_P061_OLD_CD4_ONLY_REJECTED\\n";
     return EXIT_SUCCESS;
 }

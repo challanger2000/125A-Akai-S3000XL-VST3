@@ -1,0 +1,50 @@
+name: P062 - ROM-free Linux native MAME portable runtime dependencies
+on:
+  push:
+    branches: ['feature/p017-**']
+    paths: ['.github/workflows/p062-local-linux-deps.yml']
+permissions:
+  contents: read
+jobs:
+  runtime:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    steps:
+      - name: Collect only open Linux runtime shared libraries (NO ROM or media)
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
+            libsdl2-ttf-2.0-0 libportmidi0 libflac8 libjpeg-turbo8 \
+            libasound2 libpulse0 libjack-jackd2-0
+          mkdir -p runtime-libs
+          python3 - <<'PY'
+          import re,subprocess,pathlib,shutil,hashlib,json
+          root=pathlib.Path('runtime-libs')
+          cache=subprocess.check_output(['ldconfig','-p'],text=True)
+          sought=('libSDL2_ttf-2.0.so.0','libportmidi.so.0',
+                  'libFLAC.so.8','libjpeg.so.8','libasound.so.2',
+                  'libpulse.so.0','libjack.so.0')
+          manifest={}
+          for lib in sought:
+              m=next((line.split('=>',1)[1].strip() for line in cache.splitlines()
+                      if '=>' in line and line.strip().startswith(lib+' ') and 'x86-64' in line),None)
+              if not m:
+                  print('NOT FOUND',lib);continue
+              target=pathlib.Path(m)
+              output=root/lib
+              shutil.copyfile(target,output)
+              manifest[lib]={'source':str(target),'bytes':output.stat().st_size,
+                             'sha256':hashlib.sha256(output.read_bytes()).hexdigest()}
+          (root/'manifest.json').write_text(json.dumps(manifest,indent=2))
+          print('LINUX_DEPENDENCIES_NO_OWNER_ROM',len(manifest))
+          assert 'libportmidi.so.0' in manifest and 'libSDL2_ttf-2.0.so.0' in manifest
+          PY
+      - name: Upload ROM-free system-library runtime dependencies
+        uses: actions/upload-artifact@v4
+        with:
+          name: 125A-P062-Linux-S3000XL-native-runtime-libs-ROM-FREE
+          path: runtime-libs/**
+          retention-days: 7
+          if-no-files-found: error
