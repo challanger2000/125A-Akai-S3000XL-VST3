@@ -16,6 +16,14 @@
 - Independently compiled five-case C++17 test covers no media, CD-only, Unicode path, HDD-only, HDD+CD; checks rejection of the old CD-only ID4 mapping.
 - This is not yet an owner-ROM Windows-VST3/DAW sample-loading and recall PASS.
 
+## Independent P050 private original-ROM test of the actual new command-line configuration
+- Verified owner ISO length 542117888 bytes; SHA-256 `388ac703b05d0f93dcbba9e0b3b03d209df59d4bf40c976cfb9871195d289613`. Original ROMs and CD data remained outside public GitHub.
+- P050 helper's CD-only argument sequence was executed verbatim by native MAME 0.288: `-scsi:4 "" -scsi:5 cdrom_2x -cdrm <owner-iso>` with original V2.0 firmware. MAME process returned exit code 0; no special CD parser was injected.
+- IMPORTANT CONTROL: Allow 5.0 seconds of original firmware boot before sending first LOAD button; pressing LOAD at emulated time 0 produced `waiting for hard disk ready` and is an invalid early-boot test, not evidence that an inserted CD is unreadable.
+- Firmware's genuine LOAD > F2 VOLS screen at emulated time 17.15 seconds displayed 14 Disk Volumes, including `3001 G.PF 2`, `3012 E.PF 1`, `3018 STACK P`; screen captured from original HD61830 MAME emulated LCD.
+- Independent second process, same P050 arguments, chose firmware LOAD > F8 GO on first volume. Firmware subsequently displayed 4 programs and 18 samples on loading; after pressing SINGLE at emulated time 35.4 seconds, original PROGRAMS IN MEMORY showed B-GRAND PF, CHORUS PF, SOFT GRAND and PIANO PAD under Volume 3001 G.PF 2. This confirms actual original-firmware sample/program import from the user ISO, not merely ISO structure or volume-directory parsing.
+- Limit: Native patched MAME Linux / genuine original-ROM evidence, not the compiled Windows VST3; the four loaded programs have NOT been independently proven playable through original MIDI→PCM in this P050 session, and project save/reopen has not been proved.
+
 ## Open release gates
 - Confirm exact P050 Windows VST3/Steinberg/125A tester build.
 - On original embedded-ROM Windows VST3 verify the owner's actual ISO shows the same 14 volumes, then load real program/sample with original MAME, trigger audible MIDI PCM and verify project save/close/reopen.
