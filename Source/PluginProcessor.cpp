@@ -4140,10 +4140,10 @@ void EnsoniqSD1AudioProcessor::runMameEngine()
             args.push_back("-rompath");
             args.push_back(safePath);
 
-        // --- S3000XL SCSI media (P050) ---
-        // The original S3000XL V2.0 firmware defaults drive SCSI ID 5.
-        // The media plan puts a CD-only configuration at target5, while
-        // preserving HDD5/CD4 when an external HDD is actually present.
+        // --- S3000XL SCSI media (P061: return to Tuth working topology) ---
+        // Original MAME S3000XL wiring: CD4, optional HDD5. All selected
+        // ISO media must be present in the -cdrm startup options before the
+        // original firmware enumerates the CD-ROM; GUI insert restarts MAME.
         // Read both image paths under the existing non-RT control mutex.
         {
             std::lock_guard<std::mutex> lock(mediaMutex);
