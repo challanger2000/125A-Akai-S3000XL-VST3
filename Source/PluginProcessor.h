@@ -173,6 +173,11 @@ public:
         std::string pendingCdPath;
         std::atomic<bool> isHddLoaded{ false };
         std::atomic<bool> isCdLoaded{ false };
+        // Status from the original MAME optical-image device, not merely the file chooser.
+        std::atomic<bool> cdMountErrorPending{ false };
+        void reportCdMountError(const juce::String& error);
+        juce::String getCdMountError() const;
+        void clearCdMountError();
         juce::String loadedHddName{ "" };
         juce::String loadedCdName{ "" };
 
@@ -518,6 +523,8 @@ private:
         uint64_t captureReadPos = 0;
     
     bool extractLegacyMameState(const juce::String& base64State, juce::MemoryBlock& outOsram, juce::MemoryBlock& outSeqram);
+    mutable juce::CriticalSection cdMountErrorLock;
+    juce::String cdMountError;
     mutable juce::CriticalSection mameFrontendErrorLock;
     juce::String mameFrontendError;
     std::thread mameThread;
