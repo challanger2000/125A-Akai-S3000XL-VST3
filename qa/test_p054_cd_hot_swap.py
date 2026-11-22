@@ -17,7 +17,9 @@ def valid(source):
     text=source[begin:end]
     if 'CD-ROM  (removable - hot swap)' not in text:
         return False
-    if text.count('if (result==6)') != 1:
+    # One branch chooses the ISO file filter; the other dispatches the image
+    # mount. Both are valid and must remain distinct.
+    if text.count('if (result==6)') != 2:
         return False
     if text.count('else if (result==7)') != 1:
         return False

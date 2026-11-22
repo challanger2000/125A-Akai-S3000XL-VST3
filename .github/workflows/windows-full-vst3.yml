@@ -22,6 +22,11 @@ jobs:
     timeout-minutes: 180
     steps:
       - uses: actions/checkout@v4
+      - name: P054 original CD hot insert and eject UI routes
+        shell: pwsh
+        run: |
+          python qa/test_p054_cd_hot_swap.py
+          if ($LASTEXITCODE -ne 0) { throw "CD media unexpectedly resets original sampler RAM" }
       - name: Install MAME 0.288 build prerequisites
         uses: msys2/setup-msys2@v2
         with:
@@ -43,11 +48,6 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "MAME patch is not applicable" }
           git -C external/mame apply "$env:GITHUB_WORKSPACE/mame-0288-s3000xl-vst.patch"
           if ($LASTEXITCODE -ne 0) { throw "MAME patch application failed" }
-      - name: P054 original CD hot insert and eject UI routes
-        shell: pwsh
-        run: |
-          python qa/test_p054_cd_hot_swap.py
-          if ($LASTEXITCODE -ne 0) { throw "CD media unexpectedly resets original sampler RAM" }
       - name: P052 CD before original MAME project recall regression
         shell: pwsh
         run: |
