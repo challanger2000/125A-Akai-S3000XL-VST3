@@ -500,6 +500,16 @@ void EnsoniqSD1AudioProcessorEditor::timerCallback()
         return;
     }
 
+    // A checked file path is not proof of a mounted Akai CD.
+    // Surface MAME's actual load failure once, on the GUI message thread.
+    if (audioProcessor.cdMountErrorPending.exchange(
+            false, std::memory_order_acq_rel)) {
+        juce::AlertWindow::showMessageBoxAsync(
+            juce::AlertWindow::WarningIcon,
+            "Akai S3000XL CD-ROM",
+            audioProcessor.getCdMountError());
+    }
+
     // Dynamic Window Aspect Ratio Monitor
     int currentView = audioProcessor.requestedViewIndex.load(std::memory_order_acquire);
     if (currentView != lastView) {
