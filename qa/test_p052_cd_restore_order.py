@@ -11,7 +11,7 @@ START = "virtual void update(bool skip_redraw) override {"
 MOUNT = "if (processor->requestCdLoad.exchange(false, std::memory_order_acquire))"
 RESTORE = "if (const auto work=processor->nativeRestore.take())"
 IMAGE = "image.load(processor->pendingCdPath)"
-MARKER = "        // P052: service pending CD changes"
+MARKER = "        // P060: mount optical media on the native MAME worker"
 END = "        // P017 native full MAME snapshot."
 
 
@@ -30,7 +30,8 @@ def valid(source):
         "std::lock_guard<std::mutex> lock(processor->mediaMutex)",
         "image.unload();",
         "const auto result = image.load(processor->pendingCdPath);",
-        "if (result.first)",
+        "const bool ready = !result.first && image.exists()",
+        "if (!ready)",
         "isCdLoaded.store(false",
         "foundCdImageDevice",
     ))
