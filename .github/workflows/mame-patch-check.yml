@@ -1,7 +1,7 @@
 name: 125A Akai - MAME 0.288 patch integrity
 on:
   push:
-    branches: [ 'develop/**' ]
+    branches: [ 'develop/**', 'feature/p017-**' ]
     paths:
       - 'mame-0288-s3000xl-vst.patch'
       - '.github/workflows/mame-patch-check.yml'
@@ -22,6 +22,7 @@ jobs:
           git clone --filter=blob:none --depth=1 --branch mame0288 --no-checkout https://github.com/mamedev/mame.git mame-reference
           git -C mame-reference sparse-checkout set --no-cone \
             src/devices/machine/am9517a.cpp \
+            src/devices/bus/nscsi/cd.cpp \
             src/devices/sound/l7a1045_l6028_dsp_a.cpp \
             src/devices/sound/l7a1045_l6028_dsp_a.h \
             src/frontend/mame/ui/ui.cpp \
