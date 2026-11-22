@@ -1869,7 +1869,7 @@ index 44db8253..390b9bc3 100644
  }
  
  // stock wave memory is 4x HM514400 1Mx4 = 2 MiB
-@@ -531,6 +1522,1112 @@ HD44780_PIXEL_UPDATE(s3000_state::lcd_pixel_update)
+@@ -531,6 +1522,1115 @@ HD44780_PIXEL_UPDATE(s3000_state::lcd_pixel_update)
  	}
  }
  
@@ -2829,6 +2829,9 @@ index 44db8253..390b9bc3 100644
 +
 +TIMER_CALLBACK_MEMBER(s3000_state::rateprobe_tick)
 +{
++	// P065: Diagnostic only. Avoid 1000 CPU-RAM reads/s in release.
++	// Keep the allocated timer and callback identity for native state recall.
++	if (!S3000_SAMPLING_DIAG) return;
 +	// [SAMPLING 79] THE NUMBER THE WHOLE HUNT IS ABOUT. SAMPLING 78 found the position: DS is 0, so it
 +	// really is at 007904h, and the structure is confirmed by the machine itself - the value read was
 +	// 1B737CA8h while BX was 1B70h, which is exactly 1B73h masked with 0FFFCh. So it is 16.16 fixed
@@ -2982,7 +2985,7 @@ index 44db8253..390b9bc3 100644
  uint16_t s3000_state::dma_mem16r_cb(offs_t offset)
  {
  	return m_maincpu->space(AS_PROGRAM).read_word(offset << 1);
-@@ -588,8 +2685,13 @@ void s3000_state::base(machine_config &config)
+@@ -588,8 +2688,13 @@ void s3000_state::base(machine_config &config)
  	m_maincpu->out_memw_cb().set(FUNC(s3000_state::dma_memw_cb));
  	m_maincpu->in_mem16r_cb().set(FUNC(s3000_state::dma_mem16r_cb));
  	m_maincpu->out_mem16w_cb().set(FUNC(s3000_state::dma_mem16w_cb));
@@ -2998,7 +3001,7 @@ index 44db8253..390b9bc3 100644
  	m_maincpu->sint_handler_cb().set_inputline(m_maincpu, INPUT_LINE_IRQ0);
  	m_maincpu->txrdy_handler_cb().set_inputline(m_maincpu, INPUT_LINE_IRQ4);
  
-@@ -598,7 +2700,54 @@ void s3000_state::base(machine_config &config)
+@@ -598,7 +2703,54 @@ void s3000_state::base(machine_config &config)
  	m_maincpu->in_ior_cb<1>().set(m_fdc, FUNC(upd72069_device::dma_r));
  	m_maincpu->out_iow_cb<1>().set(m_fdc, FUNC(upd72069_device::dma_w));
  	m_maincpu->in_io16r_cb<3>().set(m_dsp, FUNC(l7a1045_sound_device::dma_r16_cb));
@@ -3054,7 +3057,7 @@ index 44db8253..390b9bc3 100644
  
  	m_maincpu->set_tclk(32_MHz_XTAL/32); // only timer 2 uses external TCLK, and it needs to be ~1 MHz for panel key repeat to be sane
  	m_maincpu->v53_tout_handler<0>().set_inputline(m_maincpu, INPUT_LINE_IRQ1);
-@@ -606,7 +2755,7 @@ void s3000_state::base(machine_config &config)
+@@ -606,7 +2758,7 @@ void s3000_state::base(machine_config &config)
  	constexpr XTAL V53_CLKOUT = 32_MHz_XTAL / 2;
  //  constexpr XTAL V53_PCLKOUT = 32_MHz_XTAL / 4;
  
@@ -3063,7 +3066,7 @@ index 44db8253..390b9bc3 100644
  
  	SCREEN(config, m_screen, SCREEN_TYPE_LCD);
  	m_screen->set_refresh_hz(80);
-@@ -625,7 +2774,11 @@ void s3000_state::base(machine_config &config)
+@@ -625,7 +2777,11 @@ void s3000_state::base(machine_config &config)
  	m_fdc->drq_wr_callback().set(m_maincpu, FUNC(v53a_device::dreq_w<1>));
  	m_fdc->ts_rd_callback().set(FUNC(s3000_state::ts_r));
  
@@ -3076,7 +3079,7 @@ index 44db8253..390b9bc3 100644
  
  	HD61830(config, m_lcdc, 4.9152_MHz_XTAL / 2 / 2); // LC7981
  
-@@ -680,13 +2833,87 @@ void s3000_state::base(machine_config &config)
+@@ -680,13 +2836,87 @@ void s3000_state::base(machine_config &config)
  
  	SPEAKER(config, "speaker", 2).front();
  
@@ -3165,7 +3168,7 @@ index 44db8253..390b9bc3 100644
  	TIMER(config, "dialtimer").configure_periodic(FUNC(s3000_state::dial_timer_tick), attotime::from_hz(60.0));
  }
  
-@@ -696,7 +2923,7 @@ void s3000_state::s2000(machine_config &config)
+@@ -696,7 +2926,7 @@ void s3000_state::s2000(machine_config &config)
  	m_maincpu->set_clock(31.9488_MHz_XTAL);
  	m_maincpu->set_addrmap(AS_PROGRAM, &s3000_state::s2000_map);
  	m_maincpu->set_addrmap(AS_IO, &s3000_state::s2000_io_map);
@@ -3174,7 +3177,7 @@ index 44db8253..390b9bc3 100644
  
  	config.device_remove("lcdc");
  
-@@ -725,13 +2952,61 @@ void s3000_state::s3000xl(machine_config &config)
+@@ -725,13 +2955,61 @@ void s3000_state::s3000xl(machine_config &config)
  	base(config);
  	m_maincpu->set_addrmap(AS_PROGRAM, &s3000_state::s3000xl_map);
  	m_maincpu->set_addrmap(AS_IO, &s3000_state::s3000xl_io_map);
