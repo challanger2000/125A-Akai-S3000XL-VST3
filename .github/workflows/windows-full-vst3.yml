@@ -1,6 +1,15 @@
 name: 125A Akai - full Windows VST3 ROM-free build
 on:
   workflow_dispatch:
+  # P059: the full native Windows job must also be visible as a PR check.
+  pull_request:
+    branches: [ 'feature/p017-**' ]
+    paths:
+      - 'CMakeLists.txt'
+      - 'Source/**'
+      - 'mame-0288-s3000xl-vst.patch'
+      - 'scripts/build/**'
+      - '.github/workflows/windows-full-vst3.yml'
   push:
     branches: [ 'develop/**', 'feature/p017-**' ]
     paths:
