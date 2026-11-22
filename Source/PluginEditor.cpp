@@ -637,12 +637,12 @@ void EnsoniqSD1AudioProcessorEditor::paint (juce::Graphics& g)
         g.setFont(22.0f);
 
         const int exitCode = audioProcessor.mameLastExitCode.load(std::memory_order_acquire);
-        juce::String msg = "125A Akai S3000XL - MAME Engine Offline\\n\\n";
+        juce::String msg = "125A Akai S3000XL - MAME Engine Offline\n\n";
         if (exitCode >= 0)
             msg += "MAME frontend exited (code " + juce::String(exitCode)
-                + ").\\nPress Restart engine below; no DAW reload is required.";
+                + ").\nPress Restart engine below; no DAW reload is required.";
         else
-            msg += "Waiting for host activation or internal startup.\\n"
+            msg += "Waiting for host activation or internal startup.\n"
                    "If startup failed, press Restart engine below.";
         g.drawFittedText(msg, getLocalBounds().reduced(20), juce::Justification::centred, 10);
         return;
@@ -899,12 +899,12 @@ void EnsoniqSD1AudioProcessorEditor::paint (juce::Graphics& g)
         g.setFont(22.0f);
 
         const int exitCode = audioProcessor.mameLastExitCode.load(std::memory_order_acquire);
-        juce::String msg = "125A Akai S3000XL - MAME Engine Offline\\n\\n";
+        juce::String msg = "125A Akai S3000XL - MAME Engine Offline\n\n";
         if (exitCode >= 0)
             msg += "MAME frontend exited (code " + juce::String(exitCode)
-                + ").\\nPress Restart engine below; no DAW reload is required.";
+                + ").\nPress Restart engine below; no DAW reload is required.";
         else
-            msg += "Waiting for host activation or internal startup.\\n"
+            msg += "Waiting for host activation or internal startup.\n"
                    "If startup failed, press Restart engine below.";
         g.drawFittedText(msg, getLocalBounds().reduced(20), juce::Justification::centred, 10);
         return;
