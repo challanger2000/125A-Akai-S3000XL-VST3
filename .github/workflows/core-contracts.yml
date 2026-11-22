@@ -17,6 +17,7 @@ on:
       - 'qa/private_original_rom_sds_source_recall.py'
       - 'qa/test_original_rack_overlay_wiring.py'
       - 'qa/test_p052_cd_restore_order.py'
+      - 'qa/test_p054_cd_hot_swap.py'
       - 'qa/test_no_external_wav_import.py'
   pull_request:
     paths:
@@ -34,6 +35,7 @@ on:
       - 'qa/private_original_rom_sds_source_recall.py'
       - 'qa/test_original_rack_overlay_wiring.py'
       - 'qa/test_p052_cd_restore_order.py'
+      - 'qa/test_p054_cd_hot_swap.py'
 permissions:
   contents: read
 jobs:
@@ -64,3 +66,5 @@ jobs:
         run: python qa/test_original_rack_overlay_wiring.py
       - name: P052 CD before project state + negative controls
         run: python qa/test_p052_cd_restore_order.py
+      - name: P054 CD image insert/eject preserves loaded Akai RAM
+        run: python qa/test_p054_cd_hot_swap.py

@@ -1470,7 +1470,7 @@ void EnsoniqSD1AudioProcessorEditor::loadMediaButtonClicked()
     m.addItem(2, "Insert Floppy Image (.img, .hfe, .dsk)...");
     m.addItem(4, "Eject Floppy", audioProcessor.isFloppyLoaded.load(std::memory_order_acquire));
     m.addSeparator();
-    m.addSectionHeader("CD-ROM  (reboots on change)");
+    m.addSectionHeader("CD-ROM  (removable - hot swap)");
     m.addItem(6, "Insert CD-ROM Image (.chd, .cue, .iso)...");
     m.addItem(7, "Eject CD-ROM", audioProcessor.isCdLoaded.load(std::memory_order_acquire));
     m.addSeparator();
@@ -1526,8 +1526,16 @@ void EnsoniqSD1AudioProcessorEditor::loadMediaButtonClicked()
                         }
                     }
                     e->saveGlobalSettings();
-                    if (result==2) p.requestFloppyLoad.store(true,std::memory_order_release);
-                    else {p.shutdownMame();p.checkRomAndBootMame();}
+                    if (result==2) {
+                        p.requestFloppyLoad.store(true,std::memory_order_release);
+                    } else if (result==6) {
+                        // P054: the stable cdrom_2x device already exists;
+                        // replacing its disc must not destroy Akai sample RAM.
+                        p.requestCdLoad.store(true,std::memory_order_release);
+                    } else {
+                        // Fixed SCSI hard disk topology still requires a restart.
+                        p.shutdownMame();p.checkRomAndBootMame();
+                    }
                     e->repaint();
                 });
                 return;
@@ -1542,7 +1550,10 @@ void EnsoniqSD1AudioProcessorEditor::loadMediaButtonClicked()
                  processor.pendingCdPath="";processor.loadedCdName="";
                  processor.isCdLoaded.store(false,std::memory_order_release);}
                 editor->saveGlobalSettings();
-                processor.shutdownMame();processor.checkRomAndBootMame();
+                // P054: preserve the loaded Akai programs and 18 CD samples
+                // when the removable disc is ejected. Original MAME hot-unload
+                // produced bit-identical MIDI PCM against no-disc replay.
+                processor.requestCdLoad.store(true,std::memory_order_release);
             } else if (result==9) {
                 {std::lock_guard<std::mutex> lock(processor.mediaMutex);
                  processor.pendingHddPath="";processor.loadedHddName="";
