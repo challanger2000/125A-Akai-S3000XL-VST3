@@ -194,6 +194,8 @@ public:
     std::atomic<bool> mameHasStarted{ false };
     // -1: no MAME frontend result yet; >=0: last MAME frontend exit code.
     std::atomic<int> mameLastExitCode{ -1 };
+    // A single automatic recovery after a fatal MAME startup return.
+    std::atomic<bool> mameAutomaticRetryAttempted{ false };
     // Preserve the original MAME frontend error message for the host UI.
     void setMameFrontendError(const juce::String& message);
     juce::String getMameFrontendError() const;
