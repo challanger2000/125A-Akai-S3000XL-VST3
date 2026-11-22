@@ -75,7 +75,6 @@
 #define VST_TRACE 0
 #define VST_LOG(...) do { if (VST_TRACE && mameMachine != nullptr) mameMachine->logerror(__VA_ARGS__); } while (0)
 #include "diimage.h"
-#include "bus/nscsi/cd.h" // P060 original 2x SCSI optical drive media-change synchronization
 #include "imagedev/midiin.h" // P030 actual original Akai UART input-image, not RAM access
 #include "AkaiSdsAssignment.h" // P031 original LCD keygroup verification
 #include "AkaiSdsBootGate.h" // P035 original firmware boot before MIDI SDS
@@ -950,7 +949,7 @@ public:
                         // nscsi_cdrom_device::device_reset() copies the image
                         // sequence counter (cd.cpp) and preserves the mounted ISO.
                         device_t* cdTarget = image.device().owner();
-                        if (cdTarget != nullptr && cdTarget->type() == NSCSI_CDROM_2X) {
+                        if (cdTarget != nullptr && std::strcmp(cdTarget->shortname(), "scsi_cdrom2x") == 0) {
                             cdTarget->reset();
                             processor->isCdLoaded.store(true, std::memory_order_release);
                             processor->clearCdMountError();
