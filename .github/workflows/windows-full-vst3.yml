@@ -31,6 +31,11 @@ jobs:
     timeout-minutes: 180
     steps:
       - uses: actions/checkout@v4
+      - name: P060 Akai ISO native mount ready and no CPU reset
+        shell: pwsh
+        run: |
+          python qa/test_p060_cd_hotmount_ready.py
+          if ($LASTEXITCODE -ne 0) { throw "MAME SCSI CD image mount readiness regression" }
       - name: P059 in-place MAME engine restart and original native error capture
         shell: pwsh
         run: |
