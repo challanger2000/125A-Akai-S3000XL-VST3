@@ -22,3 +22,15 @@ The MAME image loader also accepted owner ISO via hot insertion into initially e
 - Source-level regression checks exact editor routing and kills two old reboot mutants. A genuine Windows VST3 ROM-backed DAW project save/reopen, factory media selection and multi-instance check are still required.
 
 Final user release: NOT VERIFIED until actual Windows Studio Pro audio+project-recall evidence.
+
+## Separate fresh-boot original firmware hot-insert proof
+
+To challenge the distinct GUI **CD insert** path independently of CD eject:
+- Started a fresh standalone MAME 0.288 S3000XL with original owner V2.0 firmware, `-scsi:4 "" -scsi:5 cdrom_2x`, **no ISO on the MAME command line**.
+- At emulated 5.0 s, called the genuine target5 `device_image_interface` image.load() with the owner's unchanged 542117888-byte Akai ISO. It returned no error.
+- Used genuine physical Akai keys to open LOAD, F5 SCSI, F1 LOAD (select the SCSI device instead of the initial FLOPPY), then F2 VOLS. At emulated 18.28 s the **original Akai screen listed 14 real Volumes**, including 3001 G.PF 2, 3012 E.PF 1 and 3018 STACK P. No fake filesystem parser or custom machine RAM injection.
+- Independent matched negative: same original firmware, same constant cdrom_2x device and exact input/timing sequence, but **no image.load() and no CD media**. The original Akai remained on FLOPPY/empty load page, and no Akai volumes appeared.
+- These two native firmware traces are an executed positive/negative test of the CD insertion and SCSI media path. They do not cover original Windows JUCE UI MIDI/audio integration.
+
+During the first hot-insert trial we did not call F1 LOAD from the Akai SCSI page; the firmware still selected the floppy, and no CD Volumes appeared. That incomplete procedure was not a valid proof of failed hot-insert; the corrected actual firmware route above succeeded.
+
