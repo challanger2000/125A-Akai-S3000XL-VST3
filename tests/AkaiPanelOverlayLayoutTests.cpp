@@ -11,7 +11,7 @@ using akai::panel_overlay::Rect;
 // Never use assert() here: that would make every geometry probe a NO-OP.
 #define REQUIRE(expr) do { \
     if (!(expr)) { \
-        std::cerr << "P048_FAIL line " << __LINE__ << ": " << #expr << '\\n'; \
+        std::cerr << "P048_FAIL line " << __LINE__ << ": " << #expr << std::endl; \
         return 1; \
     } \
 } while (false)
