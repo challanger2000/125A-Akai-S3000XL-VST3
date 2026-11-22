@@ -52,7 +52,7 @@ def valid(patch: str) -> bool:
 
 def main():
     patch = Path("mame-0288-s3000xl-vst.patch").read_text(encoding="utf-8")
-    assert valid(patch), "Speed-only 2x->8x optical patch missing or widened"
+    assert valid(patch), "Speed-only 2x->4x optical patch missing or widened"
     mutants = [
         patch.replace(NEW, OLD, 1),
         patch.replace("614'400", "921'600", 1),
