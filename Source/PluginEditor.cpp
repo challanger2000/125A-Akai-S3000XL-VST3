@@ -11,6 +11,7 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
 #include "mpc_clickmap.h"
+#include "AkaiPanelOverlayLayout.h"
 #include "BinaryData.h" // Small icons generated locally; original MAME GUI remains
 
 EnsoniqSD1AudioProcessorEditor::EnsoniqSD1AudioProcessorEditor (EnsoniqSD1AudioProcessor& p)
@@ -179,10 +180,12 @@ EnsoniqSD1AudioProcessorEditor::EnsoniqSD1AudioProcessorEditor (EnsoniqSD1AudioP
     
     // --- BUTTON INITIALIZATION ---
     addAndMakeVisible(loadMediaButton);
-    loadMediaButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff333333));
+    loadMediaButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff282b30));
+    loadMediaButton.setColour(juce::TextButton::buttonOnColourId, juce::Colour(0xff42474e));
     loadMediaButton.setColour(juce::TextButton::textColourOffId, juce::Colours::lightgrey);
     loadMediaButton.setWantsKeyboardFocus(false);
     loadMediaButton.setMouseClickGrabsKeyboardFocus(false);
+    loadMediaButton.setTooltip("MEDIA: load or eject original Akai floppy, CD-ROM and SCSI hard disk images");
     loadMediaButton.onClick = [this] { loadMediaButtonClicked(); };
     floppyIcon = juce::Drawable::createFromImageData(BinaryData::floppy_svg, BinaryData::floppy_svgSize);
     cartIcon = juce::Drawable::createFromImageData(BinaryData::cart_svg, BinaryData::cart_svgSize);
@@ -260,8 +263,11 @@ EnsoniqSD1AudioProcessorEditor::EnsoniqSD1AudioProcessorEditor (EnsoniqSD1AudioP
     addAndMakeVisible(settingsButton);
     settingsButton.setWantsKeyboardFocus(false);
     settingsButton.setMouseClickGrabsKeyboardFocus(false);
-    settingsButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff333333));
+    settingsButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff282b30));
+    settingsButton.setColour(juce::TextButton::buttonOnColourId, juce::Colour(0xff42474e));
     settingsButton.setColour(juce::TextButton::textColourOffId, juce::Colours::lightgrey);
+    settingsButton.setButtonText("SETUP");
+    settingsButton.setTooltip("SETUP: panel layout, buffer size and About");
     settingsButton.onClick = [this] { toggleSettings(); };
 
     // GroupComponent and its children are hidden by default
@@ -1086,12 +1092,6 @@ void EnsoniqSD1AudioProcessorEditor::resized()
 
     // --- DYNAMIC BUTTON POSITIONING & SAVE BADGE BOUNDS ---
 
-    int loadBtnX = 55; int loadBtnY = 403;
-    int setBtnX  = 55; int setBtnY  = 443;
-    
-    float btnWidth = 192.0f;
-    float btnHeight = 30.0f;
-    
     // Save badge defaults (Compact View)
     float saveW = 135.0f; float saveH = 30.0f;
     float saveX = 471.0f; float saveY = 214.0f;
@@ -1101,9 +1101,6 @@ void EnsoniqSD1AudioProcessorEditor::resized()
     float promptCenterY = 273.0f;
 
     if (viewIdx == 1) { // Full Keyboard
-        loadBtnX = 81 ; loadBtnY = 170;
-        setBtnX  = 81;  setBtnY  = 210;
-        
         saveW = 135.0f;  saveH = 30.0f;
         saveX = 954.0f; saveY = 325.0f;
 
@@ -1111,9 +1108,6 @@ void EnsoniqSD1AudioProcessorEditor::resized()
         promptCenterY = 216.0f;
     }
     else if (viewIdx == 2) { // Rack Panel
-        loadBtnX = 20;  loadBtnY = 270;
-        setBtnX  = 220; setBtnY  = 270;
-        
         saveW = 135.0f;  saveH = 30.0f;
         saveX = 471.0f;  saveY = 214.0f;
 
@@ -1121,12 +1115,6 @@ void EnsoniqSD1AudioProcessorEditor::resized()
         promptCenterY = 273.0f;
     }
     else if (viewIdx == 3) { // Tablet
-        btnWidth = 300.0f;
-        btnHeight = 40.0f;
-        
-        loadBtnX = 36;  loadBtnY = 1253;
-        setBtnX  = 356; setBtnY  = 1253;
-        
         saveW = 190.0f;  saveH = 40.0f;
         saveX = 343.0f;  saveY = 448.0f;
 
@@ -1134,11 +1122,18 @@ void EnsoniqSD1AudioProcessorEditor::resized()
         promptCenterY = 544.0f;
     }
 
-    loadMediaButton.setBounds(juce::roundToInt(loadBtnX * scaleX), juce::roundToInt(loadBtnY * scaleY),
-                              juce::roundToInt(btnWidth * scaleX), juce::roundToInt(btnHeight * scaleY));
-                              
-    settingsButton.setBounds(juce::roundToInt(setBtnX * scaleX), juce::roundToInt(setBtnY * scaleY),
-                             juce::roundToInt(btnWidth * scaleX), juce::roundToInt(btnHeight * scaleY));
+    // P048: the screenshot revealed that layout-specific 2048x1744 / 671 /
+    // 379 / 1476 y coordinates put these child buttons directly over the
+    // POWER switch, PHONES and DISPLAY CONTRAST on the original 6000x1112
+    // MAME rack face. Anchor both buttons to the unused LEFT RACK EAR,
+    // between its screws, based only on the ACTUAL editor viewport size.
+    // Same physical position in all four Panel Layouts, at every host zoom.
+    const auto rackControls =
+        akai::panel_overlay::rackEarControls(getWidth(), getHeight());
+    const auto& media = rackControls.media;
+    const auto& setup = rackControls.settings;
+    loadMediaButton.setBounds(media.x, media.y, media.w, media.h);
+    settingsButton.setBounds(setup.x, setup.y, setup.w, setup.h);
 
     // Place the invisible, clickable hotspot exactly over the drawn save badge
     saveBadge.setBounds(juce::roundToInt(saveX * scaleX), juce::roundToInt(saveY * scaleY),

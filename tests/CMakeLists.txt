@@ -61,3 +61,9 @@ add_test(NAME akai_midi_image_fail_closed_contract COMMAND akai_midi_port_fail_c
 add_executable(akai_dial_recall_tests AkaiDialRecallTests.cpp)
 target_compile_features(akai_dial_recall_tests PRIVATE cxx_std_20)
 add_test(NAME akai_native_dial_recall_contract COMMAND akai_dial_recall_tests)
+
+# P048: auxiliary host buttons must stay on the original physical rack ear
+# for every legacy panel layout and every supported editor zoom.
+add_executable(akai_panel_overlay_layout_tests AkaiPanelOverlayLayoutTests.cpp)
+target_compile_features(akai_panel_overlay_layout_tests PRIVATE cxx_std_20)
+add_test(NAME akai_panel_overlay_geometry_contract COMMAND akai_panel_overlay_layout_tests)
