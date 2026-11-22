@@ -51,6 +51,11 @@ jobs:
         run: |
           python qa/test_p062_firmware_cd5_coldboot.py
           if ($LASTEXITCODE -ne 0) { throw "S3000XL CD4 original cold boot media regression" }
+      - name: P065 diagnostic rateprobe CPU bypass and original sampler isolation
+        shell: pwsh
+        run: |
+          python qa/test_p065_rateprobe_no_cpu_reads.py
+          if ($LASTEXITCODE -ne 0) { throw 'P065 original sampler rateprobe optimization regressed' }
       - name: Install MAME 0.288 build prerequisites
         uses: msys2/setup-msys2@v2
         with:

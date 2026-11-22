@@ -5,6 +5,7 @@ on:
     branches: ['feature/p017-**']
     paths:
       - '.github/workflows/p017-original-firmware-private-local-linux-runner.yml'
+      - 'mame-0288-s3000xl-vst.patch'
 permissions:
   contents: read
 jobs:
@@ -14,6 +15,8 @@ jobs:
     steps:
       - name: Checkout 125A patch source WITHOUT any owner ROM
         uses: actions/checkout@v4
+      - name: P065 ROM-free release-only rateprobe optimization invariant
+        run: python3 qa/test_p065_rateprobe_no_cpu_reads.py
       - name: Install native MAME 0.288 headless dependencies
         shell: bash
         run: |
