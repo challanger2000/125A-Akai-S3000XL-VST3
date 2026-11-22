@@ -25,12 +25,12 @@ int main()
         std::vector<std::string> expected;
     };
     const Case cases[] = {
-        {"CD_only_original_Tuth_CD4", "akai.iso", "",
-            {"-scsi:4","cdrom_2x","-scsi:5","","-cdrm","akai.iso"}},
+        {"CD_only_firmware_defaults_ID5", "akai.iso", "",
+            {"-scsi:4","","-scsi:5","cdrom_2x","-cdrm","akai.iso"}},
         {"CD_only_nonASCII_source_path", "Akai/Bibliothek 1.iso", "",
-            {"-scsi:4","cdrom_2x","-scsi:5","","-cdrm","Akai/Bibliothek 1.iso"}},
-        {"no_media_CD4_device_HDD5_disabled", "", "",
-            {"-scsi:4","cdrom_2x","-scsi:5",""}},
+            {"-scsi:4","","-scsi:5","cdrom_2x","-cdrm","Akai/Bibliothek 1.iso"}},
+        {"no_media_CD5_device_consistent", "", "",
+            {"-scsi:4","","-scsi:5","cdrom_2x"}},
         {"HDD_only_original_slot5", "", "hard.chd",
             {"-scsi:4","cdrom_2x","-scsi:5","harddisk","-hard","hard.chd"}},
         {"HDD_plus_CD_preserve_existing_mapping", "akai.iso", "hard.chd",
@@ -41,9 +41,9 @@ int main()
         akai::appendScsiMediaArguments(args,c.cd,c.hdd);
         if (!matches(args,c.expected,c.name)) return EXIT_FAILURE;
     }
-    // P050 regression: rejecting the unverified CD-only ID5 routing that
-    // failed to load the original owner Akai library in Studio Pro.
-    const std::vector<std::string> old={"-scsi:4","","-scsi:5","cdrom_2x","-cdrm","akai.iso"};
+    // Reject the CD4 layout when there is no HDD: it differs from
+    // firmware default SCSI ID5 and left the LCD at DRIVE NOT READY.
+    const std::vector<std::string> old={"-scsi:4","cdrom_2x","-scsi:5","","-cdrm","akai.iso"};
     std::vector<std::string> correct;
     akai::appendScsiMediaArguments(correct,"akai.iso","");
     if (correct==old) {
@@ -60,20 +60,20 @@ int main()
         akai::appendScsiMediaArguments(inserted,"akai.iso",hard);
         if (empty.size()<4 || inserted.size()<4 ||
             !std::equal(empty.begin(),empty.begin()+4,inserted.begin()) ||
-            empty[1]!="cdrom_2x") {
+            empty[hard.empty()?3:1]!="cdrom_2x") {
             std::cerr << "FAIL P053 optical-device changes on eject or missing ISO\n";
             return EXIT_FAILURE;
         }
     }
     // Deliberate negative: the previous P050 no-disc plain-cdrom mapping
     // violates this requirement, even though it booted normally.
-    const std::vector<std::string> oldNoDisc={"-scsi:4","cdrom","-scsi:5",""};
+    const std::vector<std::string> oldNoDisc={"-scsi:4","","-scsi:5","cdrom"};
     std::vector<std::string> currentNoDisc;
     akai::appendScsiMediaArguments(currentNoDisc,"","");
     if (currentNoDisc==oldNoDisc) {
         std::cerr << "FAIL P053 old changing-CD-device regression survived\n";
         return EXIT_FAILURE;
     }
-    std::cout << "P061_UPSTREAM_SCSI_CD4_HDD5_DISABLED_WHEN_MISSING_P050_OLD_CD5_REJECTED\\n";
+    std::cout << "P062_CD_ID5_DEFAULT_COLD_BOOT_HDD_OPTIONAL_CD4_P061_OLD_CD4_ONLY_REJECTED\\n";
     return EXIT_SUCCESS;
 }
