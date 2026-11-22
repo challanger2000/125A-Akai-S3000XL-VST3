@@ -22,6 +22,11 @@ jobs:
     timeout-minutes: 180
     steps:
       - uses: actions/checkout@v4
+      - name: P059 in-place MAME engine restart and original native error capture
+        shell: pwsh
+        run: |
+          python qa/test_p059_engine_restart.py
+          if ($LASTEXITCODE -ne 0) { throw "MAME startup error recovery contract invalid" }
       - name: P058 incomplete DAW original-machine state rejection
         shell: pwsh
         run: |
