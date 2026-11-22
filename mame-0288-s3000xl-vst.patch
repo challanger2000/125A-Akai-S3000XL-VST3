@@ -809,15 +809,16 @@ diff --git a/src/mame/akai/s3000.cpp b/src/mame/akai/s3000.cpp
 index 44db8253..390b9bc3 100644
 --- a/src/mame/akai/s3000.cpp
 +++ b/src/mame/akai/s3000.cpp
-@@ -84,6 +84,7 @@
+@@ -84,6 +84,8 @@
  ***************************************************************************/
  
  #include "emu.h"
 +#include "cpu/nec/nec.h"
++#include <cstring>
  
  #include "bus/midi/midi.h"
  #include "bus/nscsi/devices.h"
-@@ -96,6 +97,8 @@
+@@ -96,6 +98,8 @@
  #include "machine/output_latch.h"
  #include "machine/pit8253.h"
  #include "machine/upd765.h"
@@ -826,7 +827,7 @@ index 44db8253..390b9bc3 100644
  #include "sound/l7a1045_l6028_dsp_a.h"
  #include "video/hd44780.h"
  #include "video/hd61830.h"
-@@ -105,6 +108,56 @@
+@@ -105,6 +109,56 @@
  #include "softlist_dev.h"
  #include "speaker.h"
  
@@ -883,7 +884,7 @@ index 44db8253..390b9bc3 100644
  #include "formats/dfi_dsk.h"
  #include "formats/dsk_dsk.h"
  #include "formats/hxchfe_dsk.h"
-@@ -121,6 +174,299 @@
+@@ -121,6 +175,299 @@
  #include "cd3000i.lh"
  #include "cd3000xl.lh"
  
@@ -1183,7 +1184,7 @@ index 44db8253..390b9bc3 100644
  namespace {
  
  static constexpr uint8_t BIT6 = 0x40;
-@@ -142,7 +488,9 @@ public:
+@@ -142,7 +489,9 @@ public:
  		, m_floppy_led(*this, "drive_led")
  		, m_klcs(*this, "klcs")
  		, m_wadcs(*this, "wadcs")
@@ -1193,7 +1194,7 @@ index 44db8253..390b9bc3 100644
  		, m_keys(*this, "C%u", 0)
  		, m_dataentry(*this, "DATAENTRY")
  		, m_key_scan_mask(0x3f)
-@@ -189,6 +537,139 @@ protected:
+@@ -189,6 +538,139 @@ protected:
  
  	uint8_t fdc_hc365_r();
  
@@ -1333,12 +1334,17 @@ index 44db8253..390b9bc3 100644
  	uint8_t dma_memr_cb(offs_t offset);
  	void dma_memw_cb(offs_t offset, uint8_t data);
  	uint16_t dma_mem16r_cb(offs_t offset);
-@@ -240,12 +721,512 @@ private:
+@@ -240,12 +722,517 @@ private:
  
  void s3000_state::machine_start()
  {
 +	save_item(NAME(m_sampctrl));   // [SAMPLING]
 +	save_item(NAME(m_sampsel));
++	// P064: s3000xl CD/SCSI-to-sample-RAM transfers need the upstream
++	// 64-tick DMA cadence (768 / 12). A/D recording alone stays rate-limited.
++	// Other Akai machines sharing the DSP retain their current behavior.
++	if (std::strcmp(machine().system().name, "s3000xl") == 0)
++		m_dsp->set_dma_words_per_frame(12);
  	save_item(NAME(m_key_scan_mask));
  	save_item(NAME(m_last_dial));
  	save_item(NAME(m_count_dial));
@@ -1846,7 +1852,7 @@ index 44db8253..390b9bc3 100644
  	m_floppy->get_device()->setup_led_cb(floppy_image_device::led_cb(&s3000_state::floppy_led_cb, this));
  }
  void s3000_state::machine_reset()
-@@ -347,6 +1329,13 @@ void s3000_banked_state::cd3000i_io_map(address_map &map)
+@@ -347,6 +1335,13 @@ void s3000_banked_state::cd3000i_io_map(address_map &map)
  
  void s3000_state::s3000xl_io_map(address_map &map)
  {
@@ -1860,7 +1866,7 @@ index 44db8253..390b9bc3 100644
  	map(0x0000, 0x001f).m("spc", FUNC(mb89352_device::map)).umask16(0x00ff);
  	map(0x0020, 0x0023).m(m_fdc, FUNC(upd72069_device::map)).umask16(0x00ff);
  	map(0x0040, 0x0047).rw(m_klcs, FUNC(i8255_device::read), FUNC(i8255_device::write)).umask16(0x00ff);
-@@ -356,6 +1345,8 @@ void s3000_state::s3000xl_io_map(address_map &map)
+@@ -356,6 +1351,8 @@ void s3000_state::s3000xl_io_map(address_map &map)
  	map(0x0080, 0x008f).m(m_dsp, FUNC(l7a1045_sound_device::map));
  	map(0x00a0, 0x00a5).nopw(); // quiet writes to the effects DSP
  	map(0x00c0, 0x00c7).rw(m_wadcs, FUNC(i8255_device::read), FUNC(i8255_device::write)).umask16(0x00ff);
@@ -1869,7 +1875,7 @@ index 44db8253..390b9bc3 100644
  }
  
  // stock wave memory is 4x HM514400 1Mx4 = 2 MiB
-@@ -531,6 +1522,1112 @@ HD44780_PIXEL_UPDATE(s3000_state::lcd_pixel_update)
+@@ -531,6 +1528,1112 @@ HD44780_PIXEL_UPDATE(s3000_state::lcd_pixel_update)
  	}
  }
  
@@ -2029,7 +2035,7 @@ index 44db8253..390b9bc3 100644
 +		else
 +		{
 +			if (m_dsp)
-+				m_dsp->set_dma_words_per_frame(1);   // [SAMPLING 122] back to the default at the end
++				m_dsp->set_dma_words_per_frame(12); // P064: original fast sample-load after recording
 +			m_rec_active = false;
 +			m_blockreq_until = machine().time().as_double() + 3.0;   // [SAMPLING 143]
 +			S3000_LOG("RINGRD %s recording ended - %u distinct readers%s:\n",
@@ -2982,7 +2988,7 @@ index 44db8253..390b9bc3 100644
  uint16_t s3000_state::dma_mem16r_cb(offs_t offset)
  {
  	return m_maincpu->space(AS_PROGRAM).read_word(offset << 1);
-@@ -588,8 +2685,13 @@ void s3000_state::base(machine_config &config)
+@@ -588,8 +2691,13 @@ void s3000_state::base(machine_config &config)
  	m_maincpu->out_memw_cb().set(FUNC(s3000_state::dma_memw_cb));
  	m_maincpu->in_mem16r_cb().set(FUNC(s3000_state::dma_mem16r_cb));
  	m_maincpu->out_mem16w_cb().set(FUNC(s3000_state::dma_mem16w_cb));
@@ -2998,7 +3004,7 @@ index 44db8253..390b9bc3 100644
  	m_maincpu->sint_handler_cb().set_inputline(m_maincpu, INPUT_LINE_IRQ0);
  	m_maincpu->txrdy_handler_cb().set_inputline(m_maincpu, INPUT_LINE_IRQ4);
  
-@@ -598,7 +2700,54 @@ void s3000_state::base(machine_config &config)
+@@ -598,7 +2706,54 @@ void s3000_state::base(machine_config &config)
  	m_maincpu->in_ior_cb<1>().set(m_fdc, FUNC(upd72069_device::dma_r));
  	m_maincpu->out_iow_cb<1>().set(m_fdc, FUNC(upd72069_device::dma_w));
  	m_maincpu->in_io16r_cb<3>().set(m_dsp, FUNC(l7a1045_sound_device::dma_r16_cb));
@@ -3054,7 +3060,7 @@ index 44db8253..390b9bc3 100644
  
  	m_maincpu->set_tclk(32_MHz_XTAL/32); // only timer 2 uses external TCLK, and it needs to be ~1 MHz for panel key repeat to be sane
  	m_maincpu->v53_tout_handler<0>().set_inputline(m_maincpu, INPUT_LINE_IRQ1);
-@@ -606,7 +2755,7 @@ void s3000_state::base(machine_config &config)
+@@ -606,7 +2761,7 @@ void s3000_state::base(machine_config &config)
  	constexpr XTAL V53_CLKOUT = 32_MHz_XTAL / 2;
  //  constexpr XTAL V53_PCLKOUT = 32_MHz_XTAL / 4;
  
@@ -3063,7 +3069,7 @@ index 44db8253..390b9bc3 100644
  
  	SCREEN(config, m_screen, SCREEN_TYPE_LCD);
  	m_screen->set_refresh_hz(80);
-@@ -625,7 +2774,11 @@ void s3000_state::base(machine_config &config)
+@@ -625,7 +2780,11 @@ void s3000_state::base(machine_config &config)
  	m_fdc->drq_wr_callback().set(m_maincpu, FUNC(v53a_device::dreq_w<1>));
  	m_fdc->ts_rd_callback().set(FUNC(s3000_state::ts_r));
  
@@ -3076,7 +3082,7 @@ index 44db8253..390b9bc3 100644
  
  	HD61830(config, m_lcdc, 4.9152_MHz_XTAL / 2 / 2); // LC7981
  
-@@ -680,13 +2833,87 @@ void s3000_state::base(machine_config &config)
+@@ -680,13 +2839,87 @@ void s3000_state::base(machine_config &config)
  
  	SPEAKER(config, "speaker", 2).front();
  
@@ -3165,7 +3171,7 @@ index 44db8253..390b9bc3 100644
  	TIMER(config, "dialtimer").configure_periodic(FUNC(s3000_state::dial_timer_tick), attotime::from_hz(60.0));
  }
  
-@@ -696,7 +2923,7 @@ void s3000_state::s2000(machine_config &config)
+@@ -696,7 +2929,7 @@ void s3000_state::s2000(machine_config &config)
  	m_maincpu->set_clock(31.9488_MHz_XTAL);
  	m_maincpu->set_addrmap(AS_PROGRAM, &s3000_state::s2000_map);
  	m_maincpu->set_addrmap(AS_IO, &s3000_state::s2000_io_map);
@@ -3174,7 +3180,7 @@ index 44db8253..390b9bc3 100644
  
  	config.device_remove("lcdc");
  
-@@ -725,13 +2952,61 @@ void s3000_state::s3000xl(machine_config &config)
+@@ -725,13 +2958,61 @@ void s3000_state::s3000xl(machine_config &config)
  	base(config);
  	m_maincpu->set_addrmap(AS_PROGRAM, &s3000_state::s3000xl_map);
  	m_maincpu->set_addrmap(AS_IO, &s3000_state::s3000xl_io_map);
