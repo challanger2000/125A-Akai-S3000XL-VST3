@@ -18,6 +18,7 @@ on:
       - 'qa/test_original_rack_overlay_wiring.py'
       - 'qa/test_p052_cd_restore_order.py'
       - 'qa/test_p062_firmware_cd5_coldboot.py'
+      - 'qa/test_p063_fast_cd_transport.py'
       - 'qa/test_p057_native_state_header.py'
       - 'qa/test_p058_incomplete_host_state.py'
       - 'qa/test_no_external_wav_import.py'
@@ -38,6 +39,7 @@ on:
       - 'qa/test_original_rack_overlay_wiring.py'
       - 'qa/test_p052_cd_restore_order.py'
       - 'qa/test_p062_firmware_cd5_coldboot.py'
+      - 'qa/test_p063_fast_cd_transport.py'
       - 'qa/test_p057_native_state_header.py'
       - 'qa/test_p058_incomplete_host_state.py'
 permissions:
@@ -72,6 +74,8 @@ jobs:
         run: python qa/test_p052_cd_restore_order.py
       - name: P062 original firmware SCSI5 CD-ROM boot-time ISO mount
         run: python qa/test_p062_firmware_cd5_coldboot.py
+      - name: P063 SCSI CD 8x transport unchanged device identity and negative controls
+        run: python qa/test_p063_fast_cd_transport.py
       - name: P057 full MAME original machine state header/signature preflight
         run: python qa/test_p057_native_state_header.py
       - name: P058 explicit incomplete original RAM state must reject DAW recall
