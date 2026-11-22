@@ -1537,7 +1537,7 @@ void EnsoniqSD1AudioProcessorEditor::loadMediaButtonClicked()
     m.addItem(2, "Insert Floppy Image (.img, .hfe, .dsk)...");
     m.addItem(4, "Eject Floppy", audioProcessor.isFloppyLoaded.load(std::memory_order_acquire));
     m.addSeparator();
-    m.addSectionHeader("CD-ROM  (original Akai SCSI drive - auto restart)");
+    m.addSectionHeader("CD-ROM  (automatic SCSI ID - restarts sampler)");
     m.addItem(6, "Insert CD-ROM Image (.chd, .cue, .iso)...");
     m.addItem(7, "Eject CD-ROM", audioProcessor.isCdLoaded.load(std::memory_order_acquire));
     m.addSeparator();
