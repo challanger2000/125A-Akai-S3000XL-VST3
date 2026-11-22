@@ -1537,7 +1537,7 @@ void EnsoniqSD1AudioProcessorEditor::loadMediaButtonClicked()
     m.addItem(2, "Insert Floppy Image (.img, .hfe, .dsk)...");
     m.addItem(4, "Eject Floppy", audioProcessor.isFloppyLoaded.load(std::memory_order_acquire));
     m.addSeparator();
-    m.addSectionHeader("CD-ROM  (removable - hot swap)");
+    m.addSectionHeader("CD-ROM  (original Akai SCSI drive - auto restart)");
     m.addItem(6, "Insert CD-ROM Image (.chd, .cue, .iso)...");
     m.addItem(7, "Eject CD-ROM", audioProcessor.isCdLoaded.load(std::memory_order_acquire));
     m.addSeparator();
@@ -1596,9 +1596,13 @@ void EnsoniqSD1AudioProcessorEditor::loadMediaButtonClicked()
                     if (result==2) {
                         p.requestFloppyLoad.store(true,std::memory_order_release);
                     } else if (result==6) {
-                        // P054: the stable cdrom_2x device already exists;
-                        // replacing its disc must not destroy Akai sample RAM.
-                        p.requestCdLoad.store(true,std::memory_order_release);
+                        // The original S3000XL must enumerate the CD-ROM
+                        // during boot (Tuth/S3000XL-VST working path). Attach
+                        // the selected image with -cdrm BEFORE the firmware
+                        // scans SCSI, instead of an unverified hot mount.
+                        p.requestCdLoad.store(false,std::memory_order_release);
+                        p.shutdownMame();
+                        p.checkRomAndBootMame();
                     } else {
                         // Fixed SCSI hard disk topology still requires a restart.
                         p.shutdownMame();p.checkRomAndBootMame();
@@ -1617,10 +1621,10 @@ void EnsoniqSD1AudioProcessorEditor::loadMediaButtonClicked()
                  processor.pendingCdPath="";processor.loadedCdName="";
                  processor.isCdLoaded.store(false,std::memory_order_release);}
                 editor->saveGlobalSettings();
-                // P054: preserve the loaded Akai programs and 18 CD samples
-                // when the removable disc is ejected. Original MAME hot-unload
-                // produced bit-identical MIDI PCM against no-disc replay.
-                processor.requestCdLoad.store(true,std::memory_order_release);
+                // Match the proven original cold-boot CD removal path.
+                processor.requestCdLoad.store(false,std::memory_order_release);
+                processor.shutdownMame();
+                processor.checkRomAndBootMame();
             } else if (result==9) {
                 {std::lock_guard<std::mutex> lock(processor.mediaMutex);
                  processor.pendingHddPath="";processor.loadedHddName="";
