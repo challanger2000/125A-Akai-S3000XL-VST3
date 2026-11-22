@@ -79,7 +79,8 @@
 #include "AkaiSdsStateGuard.h" // P036 no DAW recall snapshot mid SDS
 #include "AkaiDialRecall.h" // P044 original MAME external rotary input on state recall
 #include "AkaiMidiPortGuard.h"
-#include "AkaiScsiMediaPlan.h" // P042 missing .mid must not become fake MIDI port
+#include "AkaiScsiMediaPlan.h"
+#include "AkaiProjectCdState.h" // P051 project-specific optical media identity // P042 missing .mid must not become fake MIDI port
 
 #include <iomanip>
 #include <fstream>
@@ -3142,6 +3143,11 @@ void EnsoniqSD1AudioProcessor::getStateInformation (juce::MemoryBlock& destData)
         xml->setAttribute("cart_path", juce::String(pendingCartPath));
         xml->setAttribute("is_floppy_loaded", isFloppyLoaded.load());
         xml->setAttribute("is_cart_loaded", isCartLoaded.load());
+        // P051: optical media belong to a project as well as global UI defaults.
+        // The complete MAME snapshot retains loaded samples, but the matching
+        // physical disc must not silently become the last CD used by another song.
+        xml->setAttribute("scsi_cd_path", juce::String(pendingCdPath));
+        xml->setAttribute("is_scsi_cd_loaded", isCdLoaded.load());
     }
 
     // P036: NEVER let a host autosave serialize an Akai MIDI Sample Dump
@@ -3321,6 +3327,19 @@ void EnsoniqSD1AudioProcessor::setStateInformation (const void* data, int sizeIn
             validatedNative=std::make_shared<const std::vector<std::uint8_t>>(
                 std::move(raw));
         }
+        // P051: stage the CD drive identity before publishing the native MAME
+        // .sta restore. Older song states without these attributes continue
+        // to use the legacy global CD selection; no guessed media is mounted.
+        const bool cdPathPresent=xmlState->hasAttribute("scsi_cd_path");
+        const bool cdFlagPresent=xmlState->hasAttribute("is_scsi_cd_loaded");
+        const juce::String savedCdPath=xmlState->getStringAttribute("scsi_cd_path","");
+        const auto cdPlan=akai::cd_project::resolve(
+            cdPathPresent, cdFlagPresent,
+            xmlState->getBoolAttribute("is_scsi_cd_loaded",false),
+            savedCdPath.toStdString(),
+            savedCdPath.isNotEmpty() && juce::File(savedCdPath).existsAsFile());
+        if(!cdPlan.valid) return; // malformed paired media identity, no mutation
+
         // 1. Restore VST Automation Parameters. For P044-format projects,
         // the saved PARAM data_entry was also synchronized with the exact
         // physical dial. It must be applied BEFORE publishing the native
@@ -3330,6 +3349,21 @@ void EnsoniqSD1AudioProcessor::setStateInformation (const void* data, int sizeIn
         }
         if(haveSavedPhysicalDial)
             dialValue.store(savedPhysicalDial,std::memory_order_release);
+        if(cdPlan.present) {
+            std::lock_guard<std::mutex> mediaGuard(mediaMutex);
+            const bool changed=(pendingCdPath!=cdPlan.path)
+                || (isCdLoaded.load(std::memory_order_acquire)!=cdPlan.mount);
+            pendingCdPath=cdPlan.path;
+            isCdLoaded.store(cdPlan.mount,std::memory_order_release);
+            loadedCdName=cdPlan.missing ? juce::String("Missing CD image")
+                : (cdPlan.mount
+                    ? juce::File(juce::String(cdPlan.path)).getFileName()
+                    : juce::String());
+            // Only the MAME owner thread may touch an already-running image;
+            // before boot, the new CD is mounted from startup arguments.
+            if(changed && mameIsFullyBooted.load(std::memory_order_acquire))
+                requestCdLoad.store(true,std::memory_order_release);
+        }
         {
             std::lock_guard<std::mutex> hostGuard(nativeStateHostMutex);
             nativeRestore.publish(std::move(validatedNative));

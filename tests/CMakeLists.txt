@@ -67,3 +67,9 @@ add_test(NAME akai_native_dial_recall_contract COMMAND akai_dial_recall_tests)
 add_executable(akai_panel_overlay_layout_tests AkaiPanelOverlayLayoutTests.cpp)
 target_compile_features(akai_panel_overlay_layout_tests PRIVATE cxx_std_20)
 add_test(NAME akai_panel_overlay_geometry_contract COMMAND akai_panel_overlay_layout_tests)
+
+# P051: project-local CD identity must preserve valid, missing and legacy media
+add_executable(akai_project_cd_state_tests P051ProjectCdStateTests.cpp)
+target_compile_features(akai_project_cd_state_tests PRIVATE cxx_std_20)
+target_include_directories(akai_project_cd_state_tests PRIVATE ${CMAKE_SOURCE_DIR}/..)
+add_test(NAME akai_project_cd_identity_contract COMMAND akai_project_cd_state_tests)
