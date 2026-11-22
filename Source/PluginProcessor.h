@@ -194,6 +194,9 @@ public:
     std::atomic<bool> mameHasStarted{ false };
     // -1: no MAME frontend result yet; >=0: last MAME frontend exit code.
     std::atomic<int> mameLastExitCode{ -1 };
+    // Preserve the original MAME frontend error message for the host UI.
+    void setMameFrontendError(const juce::String& message);
+    juce::String getMameFrontendError() const;
     std::atomic<double> initialSampleRate{ 0.0 };
     std::atomic<bool> sampleRateMismatch{ false };
     
@@ -513,6 +516,8 @@ private:
         uint64_t captureReadPos = 0;
     
     bool extractLegacyMameState(const juce::String& base64State, juce::MemoryBlock& outOsram, juce::MemoryBlock& outSeqram);
+    mutable juce::CriticalSection mameFrontendErrorLock;
+    juce::String mameFrontendError;
     std::thread mameThread;
     akai::runtime::AudioState instanceAudio; // MAME-owner-thread-only state
     std::atomic<bool> isMameRunning{ false };
