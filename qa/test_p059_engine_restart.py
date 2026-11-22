@@ -44,7 +44,7 @@ def main():
         (proc.replace("processor->setMameFrontendError(", "processor->discardMameFrontendError(", 1),hdr,ed,eh),
         (proc.replace("mameHasStarted.store(true, std::memory_order_release);", "mameHasStarted.store(false, std::memory_order_release);", 1),hdr,ed,eh),
         (proc,hdr,ed.replace("audioProcessor.shutdownMame();\n        audioProcessor.checkRomAndBootMame();", "audioProcessor.checkRomAndBootMame();",1),eh),
-        (proc,hdr,ed.replace("audioProcessor.getMameFrontendError()", "juce::String()",1),eh),
+        (proc,hdr,ed.replace("audioProcessor.getMameFrontendError()", "juce::String()"),eh),
         (proc,hdr,ed,eh.replace("juce::TextButton retryEngineButton", "juce::Label retryEngineButton",1)),
     ]
     for index, case in enumerate(mutants,1):
