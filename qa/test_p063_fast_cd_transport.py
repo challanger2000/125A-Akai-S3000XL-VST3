@@ -44,10 +44,10 @@ def valid(patch: str) -> bool:
         return False
     if any(not line.lstrip().startswith("//") for line in adds[:-1]):
         return False
-    match = re.fullmatch(r"\treturn attotime::from_ticks\(1, (\d+)'(\d+)\);", adds[-1])
+    match = re.fullmatch(r"\treturn attotime::from_ticks\(1, (\d+(?:'\d+)*)\);", adds[-1])
     if not match:
         return False
-    return int("".join(match.groups())) == 4 * 307200
+    return int(match.group(1).replace("'", "")) == 4 * 307200
 
 
 def main():
