@@ -52,3 +52,12 @@ Executed on 2026-11-22 after P054, without modifying the Windows VST3 production
 
 **Boundary:** Native original Akai firmware CD hot insertion/import, MIDI sound, full machine sample-state restore with no ISO, and two independent PCM-identical no-ISO replays are PASS for this one fixture. The original-ROM embedded Windows x64 VST3 host CD browser, project XML save/close/reopen, DAW Studio Pro, multiple instances, and installer remain **NOT RUN**. None of these observations authorizes a user release.
 
+
+**Independent per-program causal negative control:** In the hot-import saved-state **no-ISO** replay, original MIDI ProgramChange 0–4 each played C3, with 0.6-second windows in the middle of every original one-second Note On. Left/right PCM peaks by program:
+- P0: 5869/5850 (factory 4702/4740)
+- P1: 3340/3178 (**factory 0/0, exact silence**)
+- P2: 420/406 (**factory 0/0**)
+- P3: 3366/3394 (**factory 0/0**)
+- P4: 273/282 (**factory 0/0**).
+
+Original timing: MIDI note starts 0, 1.5, 3.0, 4.5 and 6.0 seconds after initial playback. Analysis windows 0.2–0.8 seconds after each note's aligned first MIDI PCM onset. All 4 added CD programs are measurably active after no-ISO native state replay, while the corresponding factory-program slots are precisely silent. This goes beyond a single-note correlation, and rules out the false-positive scenario where the original MAME restore only retains a factory test program.
