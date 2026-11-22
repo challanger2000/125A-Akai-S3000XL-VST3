@@ -42,17 +42,24 @@ jobs:
              OSD=sdl USE_QTDEBUG=0 NO_X11=0 NOWERROR=1 ARCHOPTS_CXX=-std=c++20 \
              CXXFLAGS='-std=c++20'
           ls -lh external/mame/s3000xl
-      - name: Verify original firmware owner can boot this binary without cloud ROM sharing
+      - name: Verify native Linux S3000XL optical slot before private local disc test
         shell: bash
         run: |
           set -euxo pipefail
           test -x external/mame/s3000xl
           external/mame/s3000xl -help > /tmp/mame-help.txt
           grep -qi mame /tmp/mame-help.txt
+          external/mame/s3000xl s3000xl -listslots > /tmp/s3000-slots.txt
+          grep -qi 'scsi' /tmp/s3000-slots.txt
+      - name: Export original MAME machine for ROM and ISO tests on OWNER-PRIVATE computer
+        shell: bash
+        run: |
+          set -euxo pipefail
+          test -x external/mame/s3000xl
           mkdir -p owner-local-probe
           cp external/mame/s3000xl owner-local-probe/s3000xl
           sha256sum owner-local-probe/s3000xl > owner-local-probe/sha256.txt
-          printf 'ROM-FREE original patched MAME 0.288 Linux executable.\nNO private firmware in CI.\nRun locally with owner-supplied ROM zip only.\n' > owner-local-probe/README.txt
+          printf 'ROM-FREE patched MAME 0.288 Linux S3000XL executable.\nNO firmware/ISO in public CI.\nUse on private local ROMs and Akai ISO for original SCSI5 CD boot acceptance.\n' > owner-local-probe/README.txt
           file owner-local-probe/s3000xl
       - name: Downloadable ROM-free host binary to make PRIVATE local V2.0 boot test possible
         uses: actions/upload-artifact@v4
