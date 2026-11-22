@@ -30,8 +30,8 @@ def valid(patch: str) -> bool:
         "+\tm_rateprobe->adjust(attotime::from_hz(1000), 0, attotime::from_hz(1000));" in machine_start,
         "+\tif (!S3000_SAMPLING_DIAG) return;" in callback,
         # Critical: early guard executes before any CPU memory-space read.
-        callback.index("+\tif (!S3000_SAMPLING_DIAG) return;")
-            < callback.index("+\taddress_space &sp = m_maincpu->space(AS_PROGRAM);"),
+        0 <= callback.find("+\tif (!S3000_SAMPLING_DIAG) return;")
+            < callback.find("+\taddress_space &sp = m_maincpu->space(AS_PROGRAM);"),
         # Keep the 88.2 kHz analog sampler and original transfer engine intact.
         "+\tm_adcclk->adjust(attotime::from_hz(88200), 0, attotime::from_hz(88200));" in section,
         "m_dsp->set_dma_words_per_frame(1);" in section,
