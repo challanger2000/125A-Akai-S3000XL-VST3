@@ -646,7 +646,7 @@ void EnsoniqSD1AudioProcessorEditor::paint (juce::Graphics& g)
                    "If startup failed, press Restart engine below.";
         const auto nativeError = audioProcessor.getMameFrontendError();
         if (nativeError.isNotEmpty())
-            msg += "\\n\\nMAME reported: " + nativeError;
+            msg += "\n\nMAME reported: " + nativeError;
         g.drawFittedText(msg, getLocalBounds().reduced(20), juce::Justification::centred, 10);
         return;
     }
@@ -911,7 +911,7 @@ void EnsoniqSD1AudioProcessorEditor::paint (juce::Graphics& g)
                    "If startup failed, press Restart engine below.";
         const auto nativeError = audioProcessor.getMameFrontendError();
         if (nativeError.isNotEmpty())
-            msg += "\\n\\nMAME reported: " + nativeError;
+            msg += "\n\nMAME reported: " + nativeError;
         g.drawFittedText(msg, getLocalBounds().reduced(20), juce::Justification::centred, 10);
         return;
     }
