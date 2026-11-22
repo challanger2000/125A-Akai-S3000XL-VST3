@@ -3339,3 +3339,19 @@ diff --git a/src/lib/formats/flopimg.h b/src/lib/formats/flopimg.h
  #include <cassert>
  #include <cstddef>
  #include <cstdint>
+
+diff --git a/src/devices/bus/nscsi/cd.cpp b/src/devices/bus/nscsi/cd.cpp
+--- a/src/devices/bus/nscsi/cd.cpp
++++ b/src/devices/bus/nscsi/cd.cpp
+@@ -1113,7 +1113,10 @@ attotime nscsi_cdrom_2x_device::scsi_data_byte_period()
+ {
+-	// 150 sectors/second * 2048 bytes/sector = 307,200 bytes/second
+-	return attotime::from_ticks(1, 307'200);
++	// P063: 8x virtual ISO transfer: 600 sectors/s * 2048 B = 1,228,800 B/s.
++	// Keep the cdrom_2x device class and SCSI protocol unchanged, so original
++	// firmware recognition and native MAME device-state identity are preserved.
++	// Only its data-byte pacing changes (4x faster than the earlier 2x limit).
++	return attotime::from_ticks(1, 1'228'800);
+ }
+ 
+ attotime nscsi_cdrom_2x_device::scsi_data_command_delay()
