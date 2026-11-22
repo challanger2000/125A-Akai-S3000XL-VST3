@@ -16,12 +16,12 @@ def valid(proc, header, editor):
         return False
     hot=proc[pos:end]
     if not all((
-        '#include "bus/nscsi/cd.h"' in proc,
+        'std::strcmp(cdTarget->shortname(), "scsi_cdrom2x") == 0' in hot,
         'image.brief_instance_name() != std::string("cdrm")' in hot,
         'const auto result = image.load(processor->pendingCdPath);' in hot,
         'const bool ready = !result.first && image.exists()' in hot,
         '&& processor->pendingCdPath == image.filename();' in hot,
-        'cdTarget->type() == NSCSI_CDROM_2X' in hot,
+        'cdTarget->shortname()' in hot,
         'cdTarget->reset();' in hot,
         'processor->isCdLoaded.store(true, std::memory_order_release);' in hot,
         'processor->isCdLoaded.store(false, std::memory_order_release);' in hot,
@@ -52,7 +52,7 @@ def main():
     assert valid(proc,header,editor), "P060 native media status or target-only reset is missing"
     mutants=[
         (proc.replace('cdTarget->reset();','/* no target reset */',1),header,editor),
-        (proc.replace('cdTarget->type() == NSCSI_CDROM_2X','true',1),header,editor),
+        (proc.replace('std::strcmp(cdTarget->shortname(), "scsi_cdrom2x") == 0','true',1),header,editor),
         (proc.replace('const bool ready = !result.first && image.exists()','const bool ready = image.exists()',1),header,editor),
         (proc.replace('processor->pendingCdPath == image.filename();','true;',1),header,editor),
         (proc.replace('processor->reportCdMountError(','processor->discardCdMountError('),header,editor),
