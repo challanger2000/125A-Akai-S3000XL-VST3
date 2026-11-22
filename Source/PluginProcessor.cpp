@@ -3858,6 +3858,11 @@ void EnsoniqSD1AudioProcessor::checkRomAndBootMame()
     } else {
         isRomMissing.store(false, std::memory_order_release);
         isRomInvalid.store(false, std::memory_order_release);
+        // A manual retry is still the same host instance. Mark this boot as
+        // attempted so prepareToPlay() cannot inadvertently spawn a second
+        // MAME worker after a DAW audio reprepare.
+        mameHasStarted.store(true, std::memory_order_release);
+        mameLastExitCode.store(-1, std::memory_order_release);
         isMameRunning = true;
         
         // Safety net against std::terminate if thread wasn't joined
@@ -4243,10 +4248,18 @@ void EnsoniqSD1AudioProcessor::runMameEngine()
     auto* frontend = new cli_frontend(*mameOpts, *headlessOsd);
     
     int mameResult = frontend->execute(args);
+    // MAME can exit before OSD init (e.g., invalid SCSI options). Preserve
+    // the actual frontend code instead of a generic "waiting for host" message.
+    mameLastExitCode.store(mameResult, std::memory_order_release);
     
     delete frontend;
     delete headlessOsd;
     delete mameOpts;
+
+    // A returned frontend no longer owns an active sampler, even when it
+    // returns zero after a normal shutdown. Never report a dead worker as live.
+    isMameRunning.store(false, std::memory_order_release);
+    mameIsFullyBooted.store(false, std::memory_order_release);
 
     // --- Graceful boot-failure handling ---
     // If MAME could not start (commonly: a SCSI image is exclusively locked by another app,
