@@ -22,6 +22,11 @@ jobs:
     timeout-minutes: 180
     steps:
       - uses: actions/checkout@v4
+      - name: P058 incomplete DAW original-machine state rejection
+        shell: pwsh
+        run: |
+          python qa/test_p058_incomplete_host_state.py
+          if ($LASTEXITCODE -ne 0) { throw "Incomplete Akai original state reopened silently" }
       - name: P057 original machine state signature gate and mutants
         shell: pwsh
         run: |

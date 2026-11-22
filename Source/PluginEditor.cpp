@@ -492,6 +492,15 @@ void EnsoniqSD1AudioProcessorEditor::timerCallback()
             "This project contains an unfinished legacy MIDI Sample Dump and "
             "does not contain a complete original Akai sampler state. "
             "The existing instrument state was left unchanged.");
+    if (audioProcessor.nativeRecallIncompleteRejected.exchange(
+        false,std::memory_order_acq_rel))
+        juce::AlertWindow::showMessageBoxAsync(
+            juce::AlertWindow::WarningIcon,
+            "Akai project recall was rejected",
+            "The DAW project was saved before the original Akai sampler "
+            "state could be captured completely. No factory program or "
+            "incomplete RAM dump was substituted; the existing state was "
+            "left unchanged.");
     const bool missing = audioProcessor.isRomMissing.load(std::memory_order_acquire);
     const bool invalid = audioProcessor.isRomInvalid.load(std::memory_order_acquire);
     const bool checkFailed = audioProcessor.isSelfCheckFailed.load(std::memory_order_acquire);

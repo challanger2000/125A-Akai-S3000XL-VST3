@@ -60,6 +60,18 @@ int main(){
     ck(!mayStartSnapshot(true,false),"pending_mame_load_blocks_new_save");
     ck(!mayStartSnapshot(false,true),"inflight_original_load_blocks_save");
     ck(!mayStartSnapshot(true,true),"both_inflight_blocks_save");
+    ck(!rejectIncompleteProject(false,false,false),
+       "legacy_project_without_marker_allowed");
+    ck(!rejectIncompleteProject(false,false,true),
+       "historical_native_without_completion_marker_allowed");
+    ck(!rejectIncompleteProject(true,true,true),
+       "complete_project_with_machine_image_allowed");
+    ck(rejectIncompleteProject(true,false,false),
+       "timed_out_host_save_must_fail_closed");
+    ck(rejectIncompleteProject(true,true,false),
+       "tampered_complete_flag_without_image_rejected");
+    ck(rejectIncompleteProject(true,false,true),
+       "failed_complete_flag_with_image_rejected");
     SnapshotBarrier snap;
     ck(!snap.begin(0,false,false)&&!snap.active(),
        "zero_generation_must_not_start");

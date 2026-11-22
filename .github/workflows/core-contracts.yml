@@ -19,6 +19,7 @@ on:
       - 'qa/test_p052_cd_restore_order.py'
       - 'qa/test_p054_cd_hot_swap.py'
       - 'qa/test_p057_native_state_header.py'
+      - 'qa/test_p058_incomplete_host_state.py'
       - 'qa/test_no_external_wav_import.py'
   pull_request:
     paths:
@@ -38,6 +39,7 @@ on:
       - 'qa/test_p052_cd_restore_order.py'
       - 'qa/test_p054_cd_hot_swap.py'
       - 'qa/test_p057_native_state_header.py'
+      - 'qa/test_p058_incomplete_host_state.py'
 permissions:
   contents: read
 jobs:
@@ -72,3 +74,5 @@ jobs:
         run: python qa/test_p054_cd_hot_swap.py
       - name: P057 full MAME original machine state header/signature preflight
         run: python qa/test_p057_native_state_header.py
+      - name: P058 explicit incomplete original RAM state must reject DAW recall
+        run: python qa/test_p058_incomplete_host_state.py

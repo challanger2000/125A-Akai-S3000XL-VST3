@@ -65,6 +65,15 @@ inline bool decode(std::span<const std::uint8_t> bytes,std::vector<std::uint8_t>
     out.swap(temp);return true;
 }
 
+// P058: a modern DAW project explicitly flagged as incomplete may never
+// silently become an empty factory sampler when re-opened. Historical projects
+// with neither marker nor a native image retain the legacy fallback.
+inline constexpr bool rejectIncompleteProject(bool hasCompletionMarker,
+                                             bool completionOk,
+                                             bool hasMachineImage) noexcept {
+    return hasCompletionMarker && (!completionOk || !hasMachineImage);
+}
+
 // Native save/load must not replace an outstanding firmware load. The MAME
 // public save_or_load_pending() flag remains true if immediate_load deferred
 // execution because of anonymous scheduler timers.

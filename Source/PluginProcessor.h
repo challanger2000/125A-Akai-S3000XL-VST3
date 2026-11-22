@@ -140,6 +140,9 @@ public:
     std::atomic<bool> nativeSnapshotSucceeded{false};
     juce::WaitableEvent nativeSnapshotEvent{false};
     akai::machine_state::RestoreMailbox nativeRestore;
+    // P058: original DAW state had explicit failed native capture metadata.
+    // Report rejection once from the UI timer, never from the host audio thread.
+    std::atomic<bool> nativeRecallIncompleteRejected{false};
     std::mutex nativeStateHostMutex;
     juce::File nativeSnapshotFile() const {
         return juce::File(instanceTempDir).getChildFile("state")

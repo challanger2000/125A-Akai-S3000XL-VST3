@@ -3346,6 +3346,17 @@ void EnsoniqSD1AudioProcessor::setStateInformation (const void* data, int sizeIn
         // Malformed data cannot silently fall back to partial guest RAM.
         std::shared_ptr<const std::vector<std::uint8_t>> validatedNative;
         const bool hasNative=xmlState->hasAttribute("akai_native_machine_v1");
+        // P058: getStateInformation() marks failed/timed-out native captures
+        // akai_native_complete=false. Reject those new-format songs BEFORE
+        // changing a single MIDI controller, CD path, or machine register.
+        // Older legacy projects without this marker remain supported.
+        if(akai::machine_state::rejectIncompleteProject(
+            xmlState->hasAttribute("akai_native_complete"),
+            xmlState->getBoolAttribute("akai_native_complete",false),
+            hasNative)) {
+            nativeRecallIncompleteRejected.store(true,std::memory_order_release);
+            return;
+        }
         int savedPhysicalDial=0;
         bool haveSavedPhysicalDial=false;
         // The host-controlled endless dial is part of the native-machine
