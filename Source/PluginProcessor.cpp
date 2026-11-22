@@ -895,6 +895,34 @@ public:
 #endif // SD1_DEBUG_RACK_PANEL
                 }
                         
+        // P052: service pending CD changes on the MAME owner thread BEFORE
+        // a different DAW project's native full-machine state is restored.
+        // The unique "cdrm" image slot is target 5 (CD-only) or 4 (HDD+CD).
+        if (processor->requestCdLoad.exchange(false, std::memory_order_acquire)) {
+            std::lock_guard<std::mutex> lock(processor->mediaMutex);
+            bool foundCdImageDevice = false;
+            for (device_image_interface &image : image_interface_enumerator(mame_machine->root_device())) {
+                if (image.brief_instance_name() == std::string("cdrm")) {
+                    foundCdImageDevice = true;
+                    if (processor->pendingCdPath.empty()) {
+                        image.unload();
+                    } else {
+                        const auto result = image.load(processor->pendingCdPath);
+                        if (result.first) {
+                            processor->isCdLoaded.store(false, std::memory_order_release);
+                            mame_machine->logerror("P052: CD image could not be mounted: %s\\n",
+                                                   result.first.message().c_str());
+                        }
+                    }
+                    break;
+                }
+            }
+            if (!foundCdImageDevice && !processor->pendingCdPath.empty()) {
+                processor->isCdLoaded.store(false, std::memory_order_release);
+                mame_machine->logerror("P052: No CD image device in current SCSI configuration\\n");
+            }
+        }
+
         // P017 native full MAME snapshot. Never use unsafe guest-RAM reads
         // to simulate a complete project state. All MAME save/restore operations
         // run ONLY on this MAME owner thread, outside the host audio callback.
@@ -1062,18 +1090,6 @@ public:
                 if (image.brief_instance_name() == std::string("hard")) {
                     if (processor->pendingHddPath.empty()) image.unload();
                     else image.load(processor->pendingHddPath);
-                    break;
-                }
-            }
-        }
-
-        // --- SCSI CD-ROM MOUNTING (scsi:4, brief name "cdrm"). Removable: hot-swap. ---
-        if (processor->requestCdLoad.exchange(false, std::memory_order_acquire)) {
-            std::lock_guard<std::mutex> lock(processor->mediaMutex);
-            for (device_image_interface &image : image_interface_enumerator(mame_machine->root_device())) {
-                if (image.brief_instance_name() == std::string("cdrm")) {
-                    if (processor->pendingCdPath.empty()) image.unload();
-                    else image.load(processor->pendingCdPath);
                     break;
                 }
             }

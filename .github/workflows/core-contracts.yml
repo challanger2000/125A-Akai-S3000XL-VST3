@@ -16,6 +16,7 @@ on:
       - 'tests/**'
       - 'qa/private_original_rom_sds_source_recall.py'
       - 'qa/test_original_rack_overlay_wiring.py'
+      - 'qa/test_p052_cd_restore_order.py'
       - 'qa/test_no_external_wav_import.py'
   pull_request:
     paths:
@@ -32,6 +33,7 @@ on:
       - 'tests/**'
       - 'qa/private_original_rom_sds_source_recall.py'
       - 'qa/test_original_rack_overlay_wiring.py'
+      - 'qa/test_p052_cd_restore_order.py'
 permissions:
   contents: read
 jobs:
@@ -60,3 +62,5 @@ jobs:
 
       - name: P048 original rack ear panel placement + mutation controls
         run: python qa/test_original_rack_overlay_wiring.py
+      - name: P052 CD before project state + negative controls
+        run: python qa/test_p052_cd_restore_order.py

@@ -43,6 +43,11 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "MAME patch is not applicable" }
           git -C external/mame apply "$env:GITHUB_WORKSPACE/mame-0288-s3000xl-vst.patch"
           if ($LASTEXITCODE -ne 0) { throw "MAME patch application failed" }
+      - name: P052 CD before original MAME project recall regression
+        shell: pwsh
+        run: |
+          python qa/test_p052_cd_restore_order.py
+          if ($LASTEXITCODE -ne 0) { throw "CD-image state restore order invalid" }
       - name: P050 native Akai SCSI mapping regression
         shell: msys2 {0}
         run: |
