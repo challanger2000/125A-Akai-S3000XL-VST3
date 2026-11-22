@@ -78,7 +78,8 @@
 #include "AkaiSdsBootGate.h" // P035 original firmware boot before MIDI SDS
 #include "AkaiSdsStateGuard.h" // P036 no DAW recall snapshot mid SDS
 #include "AkaiDialRecall.h" // P044 original MAME external rotary input on state recall
-#include "AkaiMidiPortGuard.h" // P042 missing .mid must not become fake MIDI port
+#include "AkaiMidiPortGuard.h"
+#include "AkaiScsiMediaPlan.h" // P042 missing .mid must not become fake MIDI port
 
 #include <iomanip>
 #include <fstream>
@@ -4014,32 +4015,16 @@ void EnsoniqSD1AudioProcessor::runMameEngine()
             args.push_back("-rompath");
             args.push_back(safePath);
 
-        // --- S3000XL SCSI media ---
-        // CD-ROM (scsi:4): plain "cdrom" and "cdrom_2x" share the SAME identity (Sony CDU-76S)
-        // and differ ONLY in SCSI data timing. The S3000XL firmware needs "cdrom_2x"'s realistic
-        // 2x pacing to read a disc CLEANLY: plain "cdrom" transfers data too fast and the sample
-        // bytes get corrupted -> crackly loads (verified in-DAW: HDD & cdrom_2x load clean, plain
-        // cdrom crackles). So use cdrom_2x WHEN a disc is loaded (clean read + firmware detection),
-        // and plain "cdrom" when empty (fast, so an idle drive never stalls the firmware/live MIDI).
-        if (isCdLoaded.load() && !pendingCdPath.empty()) {
-            args.push_back("-scsi:4"); args.push_back("cdrom_2x");
-            args.push_back("-cdrm");   args.push_back(pendingCdPath);
-        } else {
-            args.push_back("-scsi:4"); args.push_back("cdrom");
-        }
+        // --- S3000XL SCSI media (P050) ---
+        // The original S3000XL V2.0 firmware defaults drive SCSI ID 5.
+        // The media plan puts a CD-only configuration at target5, while
+        // preserving HDD5/CD4 when an external HDD is actually present.
+        // Read both image paths under the existing non-RT control mutex.
         {
             std::lock_guard<std::mutex> lock(mediaMutex);
-            // Hard disk (scsi:5) is a FIXED drive: only attach it when an image exists, and mount
-            // the image on the COMMAND LINE so it is present BEFORE device_reset. Mounting a
-            // harddisk at runtime via image.load crashes nscsi_harddisk_device::device_reset.
-            if (isHddLoaded.load() && !pendingHddPath.empty()) {
-                args.push_back("-scsi:5"); args.push_back("harddisk");
-                args.push_back("-hard");  args.push_back(pendingHddPath);
-            }
-            // A saved CD image is inserted hot once the machine is up.
-            // CD is boot-mounted via -cdrm above; no runtime hot-swap needed at startup.
+            akai::appendScsiMediaArguments(args, pendingCdPath, pendingHddPath);
         }
-    
+
         // --- 2.5 INITIAL MEDIA MOUNTING (COLD BOOT) ---
         // At DAW project load, MAME is booted from scratch. We must pass the media via
         // command line so the SD-1 OS detects them correctly during hardware initialization!

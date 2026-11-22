@@ -43,6 +43,11 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "MAME patch is not applicable" }
           git -C external/mame apply "$env:GITHUB_WORKSPACE/mame-0288-s3000xl-vst.patch"
           if ($LASTEXITCODE -ne 0) { throw "MAME patch application failed" }
+      - name: P050 native Akai SCSI mapping regression
+        shell: msys2 {0}
+        run: |
+          /mingw64/bin/g++ -std=c++17 -Wall -Wextra -Werror -I. tests/P050ScsiMediaPlan.cpp -o p050-scsi-plan-test.exe
+          ./p050-scsi-plan-test.exe
       - name: Patch JUCE VST3 callback lock to nonblocking try-lock
         shell: pwsh
         run: |
