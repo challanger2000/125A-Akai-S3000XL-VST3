@@ -51,6 +51,11 @@ jobs:
         run: |
           python qa/test_p062_firmware_cd5_coldboot.py
           if ($LASTEXITCODE -ne 0) { throw "S3000XL CD4 original cold boot media regression" }
+      - name: P063 virtual CD 8x transport speed-only patch with negative controls
+        shell: pwsh
+        run: |
+          python qa/test_p063_fast_cd_transport.py
+          if ($LASTEXITCODE -ne 0) { throw "P063 CD-ROM transport regression" }
       - name: Install MAME 0.288 build prerequisites
         uses: msys2/setup-msys2@v2
         with:
