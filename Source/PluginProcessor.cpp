@@ -75,6 +75,7 @@
 #define VST_TRACE 0
 #define VST_LOG(...) do { if (VST_TRACE && mameMachine != nullptr) mameMachine->logerror(__VA_ARGS__); } while (0)
 #include "diimage.h"
+#include "bus/nscsi/cd.h" // P060 original 2x SCSI optical drive media-change synchronization
 #include "imagedev/midiin.h" // P030 actual original Akai UART input-image, not RAM access
 #include "AkaiSdsAssignment.h" // P031 original LCD keygroup verification
 #include "AkaiSdsBootGate.h" // P035 original firmware boot before MIDI SDS
@@ -911,31 +912,61 @@ public:
 #endif // SD1_DEBUG_RACK_PANEL
                 }
                         
-        // P052: service pending CD changes on the MAME owner thread BEFORE
-        // a different DAW project's native full-machine state is restored.
-        // The unique "cdrm" image slot is target 5 (CD-only) or 4 (HDD+CD).
+        // P060: mount optical media on the native MAME worker, report the REAL
+        // image-device outcome, and notify the emulated SCSI target of the new
+        // disc. P050's SCSI ID (5 without HDD, 4 with HDD) is unchanged.
+        // A file chooser selection alone must NEVER count as a mounted disc.
         if (processor->requestCdLoad.exchange(false, std::memory_order_acquire)) {
             std::lock_guard<std::mutex> lock(processor->mediaMutex);
             bool foundCdImageDevice = false;
             for (device_image_interface &image : image_interface_enumerator(mame_machine->root_device())) {
-                if (image.brief_instance_name() == std::string("cdrm")) {
-                    foundCdImageDevice = true;
-                    if (processor->pendingCdPath.empty()) {
-                        image.unload();
+                if (image.brief_instance_name() != std::string("cdrm"))
+                    continue;
+                foundCdImageDevice = true;
+                if (processor->pendingCdPath.empty()) {
+                    image.unload();
+                    processor->isCdLoaded.store(false, std::memory_order_release);
+                    processor->clearCdMountError();
+                } else {
+                    const auto result = image.load(processor->pendingCdPath);
+                    const bool ready = !result.first && image.exists()
+                        && image.filename() != nullptr
+                        && processor->pendingCdPath == image.filename();
+                    if (!ready) {
+                        processor->isCdLoaded.store(false, std::memory_order_release);
+                        juce::String error = result.first
+                            ? juce::String::fromUTF8(result.first.message().c_str())
+                            : juce::String("MAME did not retain the selected ISO image");
+                        if (!result.second.empty())
+                            error += ": " + juce::String::fromUTF8(result.second.c_str());
+                        processor->reportCdMountError(
+                            "CD-ROM image failed to mount at emulated SCSI target: " + error);
                     } else {
-                        const auto result = image.load(processor->pendingCdPath);
-                        if (result.first) {
+                        // The unmodified MAME 0.288 CD device returns a one-shot
+                        // SCSI UNIT ATTENTION after changing a disc. Original
+                        // Akai firmware may then display DRIVE NOT READY instead
+                        // of retrying. Reset ONLY the CD target after a verified
+                        // mount; never reset the sampler, CPU, RAM or SCSI bus.
+                        // nscsi_cdrom_device::device_reset() copies the image
+                        // sequence counter (cd.cpp) and preserves the mounted ISO.
+                        device_t* cdTarget = image.device().owner();
+                        if (cdTarget != nullptr && cdTarget->type() == NSCSI_CDROM_2X) {
+                            cdTarget->reset();
+                            processor->isCdLoaded.store(true, std::memory_order_release);
+                            processor->clearCdMountError();
+                        } else {
                             processor->isCdLoaded.store(false, std::memory_order_release);
-                            mame_machine->logerror("P052: CD image could not be mounted: %s\\n",
-                                                   result.first.message().c_str());
+                            processor->reportCdMountError(
+                                "SCSI CD-ROM device mismatch after ISO insertion.");
                         }
                     }
-                    break;
                 }
+                break;
             }
             if (!foundCdImageDevice && !processor->pendingCdPath.empty()) {
                 processor->isCdLoaded.store(false, std::memory_order_release);
-                mame_machine->logerror("P052: No CD image device in current SCSI configuration\\n");
+                processor->reportCdMountError(
+                    "No CD-ROM device exists on the active SCSI bus for this ISO.");
             }
         }
 
@@ -3805,6 +3836,28 @@ bool EnsoniqSD1AudioProcessor::prepareEmbeddedRoms()
 #endif
 
 
+
+void EnsoniqSD1AudioProcessor::reportCdMountError(const juce::String& message)
+{
+    {
+        const juce::ScopedLock lock(cdMountErrorLock);
+        cdMountError = message;
+    }
+    cdMountErrorPending.store(true, std::memory_order_release);
+}
+
+juce::String EnsoniqSD1AudioProcessor::getCdMountError() const
+{
+    const juce::ScopedLock lock(cdMountErrorLock);
+    return cdMountError;
+}
+
+void EnsoniqSD1AudioProcessor::clearCdMountError()
+{
+    const juce::ScopedLock lock(cdMountErrorLock);
+    cdMountError.clear();
+    cdMountErrorPending.store(false, std::memory_order_release);
+}
 
 void EnsoniqSD1AudioProcessor::setMameFrontendError(const juce::String& message)
 {
