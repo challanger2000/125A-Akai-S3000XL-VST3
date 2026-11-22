@@ -55,7 +55,7 @@ def main():
         (proc.replace('cdTarget->type() == NSCSI_CDROM_2X','true',1),header,editor),
         (proc.replace('const bool ready = !result.first && image.exists()','const bool ready = image.exists()',1),header,editor),
         (proc.replace('processor->pendingCdPath == image.filename();','true;',1),header,editor),
-        (proc.replace('processor->reportCdMountError(','processor->discardCdMountError(',1),header,editor),
+        (proc.replace('processor->reportCdMountError(','processor->discardCdMountError('),header,editor),
         (proc.replace('cdTarget->reset();','mame_machine->schedule_hard_reset();',1),header,editor),
         (proc,header.replace('std::atomic<bool> cdMountErrorPending{ false };','',1),editor),
         (proc,header,editor.replace('audioProcessor.getCdMountError()','juce::String()',1)),
