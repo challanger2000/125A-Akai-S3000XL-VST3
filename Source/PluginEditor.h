@@ -70,6 +70,7 @@ private:
     // --- ROM HANDLING ---
     juce::TextButton locateRomButton { "Locate sd132.zip" };
     juce::TextButton rescanRomButton { "Rescan sd132.zip" };
+    juce::TextButton retryEngineButton { "Restart engine" };
     std::unique_ptr<juce::FileChooser> romChooser;
     void locateRomButtonClicked();
     

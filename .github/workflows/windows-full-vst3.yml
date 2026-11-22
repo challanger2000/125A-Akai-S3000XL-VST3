@@ -1,6 +1,15 @@
 name: 125A Akai - full Windows VST3 ROM-free build
 on:
   workflow_dispatch:
+  # P059: the full native Windows job must also be visible as a PR check.
+  pull_request:
+    branches: [ 'feature/p017-**' ]
+    paths:
+      - 'CMakeLists.txt'
+      - 'Source/**'
+      - 'mame-0288-s3000xl-vst.patch'
+      - 'scripts/build/**'
+      - '.github/workflows/windows-full-vst3.yml'
   push:
     branches: [ 'develop/**', 'feature/p017-**' ]
     paths:
@@ -22,6 +31,11 @@ jobs:
     timeout-minutes: 180
     steps:
       - uses: actions/checkout@v4
+      - name: P059 in-place MAME engine restart and original native error capture
+        shell: pwsh
+        run: |
+          python qa/test_p059_engine_restart.py
+          if ($LASTEXITCODE -ne 0) { throw "MAME startup error recovery contract invalid" }
       - name: P058 incomplete DAW original-machine state rejection
         shell: pwsh
         run: |

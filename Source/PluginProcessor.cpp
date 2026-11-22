@@ -86,6 +86,7 @@
 
 #include <iomanip>
 #include <fstream>
+#include <sstream>
 
 // MAME Versioning stubs required by the linker
 extern const char bare_build_version[] = "0.287";
@@ -762,6 +763,18 @@ private:
     
 public:
     
+    // MAME emits the actual fatal CLI/ROM/SCSI reason through osd_printf_error,
+    // even when the emulated machine never reaches OSD init().
+    void output_callback(osd_output_channel channel,
+                         const util::format_argument_pack<char>& args) override {
+        if (channel == OSD_OUTPUT_CHANNEL_ERROR && processor != nullptr) {
+            std::ostringstream stream;
+            util::stream_format(stream, args);
+            processor->setMameFrontendError(juce::String::fromUTF8(stream.str().c_str()));
+        }
+        osd_common_t::output_callback(channel, args);
+    }
+
     virtual void process_events() override {}
     virtual bool has_focus() const override { return true; }
     
@@ -2313,23 +2326,18 @@ void EnsoniqSD1AudioProcessor::prepareToPlay (double sampleRate, int samplesPerB
         
         setLatencySamples(currentThreshold + hwLatency);
     
-        // Only boot MAME the very first time play is prepared
+        // Avoid consuming the one-time boot flag in a scan or validator.
+        // Otherwise a later genuine prepareToPlay() on the same instance
+        // cannot start MAME and remains at "Engine Offline" indefinitely.
+        const juce::String hostPath = juce::PluginHostType().getHostPath().toLowerCase();
+        isMaschineHost = hostPath.contains("maschine");
+        if (hostPath.contains("scanner") || hostPath.contains("validator")) {
+            isMameRunning.store(false, std::memory_order_release);
+            return;
+        }
+
+        // Only boot MAME the first time active host audio is prepared.
         if (!mameHasStarted.exchange(true)) {
-            
-                        // --- VST SCANNER PROTECTION ---
-                        // We check which process is currently running the plugin
-                        juce::String hostPath = juce::PluginHostType().getHostPath().toLowerCase();
-                        
-                        // Detect Maschine once, shared by all processBlock Maschine-specific branches
-                        isMaschineHost = hostPath.contains("maschine");
-                        
-                        // If this is a plugin scanner or validator (e.g., Cubase vstscanner.exe),
-                        // we have absolutely no intention of running MAME and writing to the file system!
-                        if (hostPath.contains("scanner") || hostPath.contains("validator")) {
-                            isMameRunning = false;
-                            return;
-                        }
-        
         initialSampleRate.store(sampleRate);
             
                         // 1. Run rigorous Self-Check
@@ -3798,8 +3806,26 @@ bool EnsoniqSD1AudioProcessor::prepareEmbeddedRoms()
 
 
 
+void EnsoniqSD1AudioProcessor::setMameFrontendError(const juce::String& message)
+{
+    const juce::ScopedLock lock(mameFrontendErrorLock);
+    const auto clean = message.trim();
+    if (clean.isNotEmpty())
+        mameFrontendError = (mameFrontendError + " " + clean).trim().getLastCharacters(420);
+}
+
+juce::String EnsoniqSD1AudioProcessor::getMameFrontendError() const
+{
+    const juce::ScopedLock lock(mameFrontendErrorLock);
+    return mameFrontendError;
+}
+
 void EnsoniqSD1AudioProcessor::checkRomAndBootMame()
 {
+    {
+        const juce::ScopedLock lock(mameFrontendErrorLock);
+        mameFrontendError.clear();
+    }
 #ifdef AKAI_EMBED_PRIVATE_ROMS
     // Private build: MAME ROMs come solely from this plugin binary.
     // No Documents ROM folder, third-party install or user file selection.
@@ -3858,6 +3884,11 @@ void EnsoniqSD1AudioProcessor::checkRomAndBootMame()
     } else {
         isRomMissing.store(false, std::memory_order_release);
         isRomInvalid.store(false, std::memory_order_release);
+        // A manual retry is still the same host instance. Mark this boot as
+        // attempted so prepareToPlay() cannot inadvertently spawn a second
+        // MAME worker after a DAW audio reprepare.
+        mameHasStarted.store(true, std::memory_order_release);
+        mameLastExitCode.store(-1, std::memory_order_release);
         isMameRunning = true;
         
         // Safety net against std::terminate if thread wasn't joined
@@ -4243,10 +4274,18 @@ void EnsoniqSD1AudioProcessor::runMameEngine()
     auto* frontend = new cli_frontend(*mameOpts, *headlessOsd);
     
     int mameResult = frontend->execute(args);
+    // MAME can exit before OSD init (e.g., invalid SCSI options). Preserve
+    // the actual frontend code instead of a generic "waiting for host" message.
+    mameLastExitCode.store(mameResult, std::memory_order_release);
     
     delete frontend;
     delete headlessOsd;
     delete mameOpts;
+
+    // A returned frontend no longer owns an active sampler, even when it
+    // returns zero after a normal shutdown. Never report a dead worker as live.
+    isMameRunning.store(false, std::memory_order_release);
+    mameIsFullyBooted.store(false, std::memory_order_release);
 
     // --- Graceful boot-failure handling ---
     // If MAME could not start (commonly: a SCSI image is exclusively locked by another app,
