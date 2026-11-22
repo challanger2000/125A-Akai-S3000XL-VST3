@@ -35,7 +35,14 @@ inline std::uint64_t get64(const std::uint8_t* p) noexcept {
     return v;
 }
 inline bool hasMameHeader(std::span<const std::uint8_t> x) noexcept {
-    return x.size()>=32 && std::memcmp(x.data(),"MAMESAVE",8)==0;
+    // MAME 0.288 save.cpp format 2, Akai S3000XL system name.
+    // The live running_machine::save() checks the registry CRC signature
+    // separately immediately before any full-machine restore.
+    constexpr char machine[]="s3000xl";
+    return x.size()>=32 &&
+        std::memcmp(x.data(),"MAMESAVE",8)==0 &&
+        x[8]==2 && (x[9]&~std::uint8_t(0x02))==0 &&
+        std::memcmp(x.data()+10,machine,sizeof(machine))==0;
 }
 inline bool encode(std::span<const std::uint8_t> image,std::vector<std::uint8_t>& out) {
     if(!hasMameHeader(image)||image.size()>maxSnapshot)return false;

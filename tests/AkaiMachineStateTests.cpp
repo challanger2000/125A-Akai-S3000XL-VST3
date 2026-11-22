@@ -10,6 +10,10 @@ static void ck(bool v,const char* name){
 int main(){
     std::vector<std::uint8_t> payload(32768,0);
     std::memcpy(payload.data(),"MAMESAVE",8);
+    payload[8]=2; // MAME 0.288 format version
+    std::memcpy(payload.data()+10,"s3000xl",8);
+    payload[28]=0x49;payload[29]=0xa9;payload[30]=0x38;payload[31]=0x0e;
+    ck(hasMameHeader(payload),"real_akai_v2_mame_header_accept");
     for(std::size_t i=32;i<payload.size();++i)payload[i]=std::uint8_t(i*97u+5u);
     std::vector<std::uint8_t> envelope,decoded{55};
     ck(encode(payload,envelope),"accept_mame_magic");
@@ -28,6 +32,15 @@ int main(){
     ck(!decode(bad,decoded)&&decoded==failed,"bad_length_atomic");
     bad=envelope;bad[headerBytes]^=1;
     ck(!decode(bad,decoded)&&decoded==failed,"bad_machine_header_atomic");
+    bad=envelope;bad[headerBytes+8]^=1;
+    ck(!decode(bad,decoded)&&decoded==failed,
+       "wrong_mame_save_format_version_rejected_atomic");
+    bad=envelope;bad[headerBytes+10]='x';
+    ck(!decode(bad,decoded)&&decoded==failed,
+       "different_sampler_model_rejected_atomic");
+    bad=envelope;bad[headerBytes+9]=0x80;
+    ck(!decode(bad,decoded)&&decoded==failed,
+       "unsupported_mame_header_flags_rejected_atomic");
     bad=envelope;bad.push_back(0);
     ck(!decode(bad,decoded)&&decoded==failed,"trailing_bytes_rejected");
     ck(!decode(std::span<const std::uint8_t>(envelope.data(),envelope.size()-1),decoded)

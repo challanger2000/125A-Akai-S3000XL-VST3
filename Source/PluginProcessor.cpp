@@ -51,6 +51,8 @@
 
 // --- MAME Core Includes ---
 #include "emu.h"
+#include "fileio.h" // P057: MAME-native save-header compatibility preflight
+#include "save.h"
 // esqpanel.h removed for S3000XL build (no Ensoniq panel/VFD device)
 #include "frontend/mame/ui/ui.h"
 #include "osd/modules/lib/osdobj_common.h"
@@ -948,6 +950,34 @@ public:
                             && stream->write(work.bytes->data(),work.bytes->size())) {
                             stream->flush();
                             stream.reset();
+                            // P057: use MAME's own authoritative header
+                            // validation against the CURRENT running device registry,
+                            // including the device-layout signature.  A mismatched
+                            // cdrom/cdrom_2x or HDD topology must never be reported
+                            // as a successful Akai project restore just because
+                            // immediate_load() returned void and cleared pending.
+                            const std::string statePath =
+                                dest.getFullPathName().toStdString();
+                            bool nativeHeaderMatches=false;
+                            std::string nativeHeaderError;
+                            {
+                                emu_file verify(OPEN_FLAG_READ);
+                                if (const auto opened=verify.open(statePath)) {
+                                    nativeHeaderError=opened.message();
+                                } else {
+                                    const auto checked=save_manager::check_file(
+                                        *mame_machine,verify,
+                                        mame_machine->system().name);
+                                    nativeHeaderMatches=(checked.first==STATERR_NONE);
+                                    nativeHeaderError=checked.second;
+                                    verify.close();
+                                }
+                            }
+                            if (!nativeHeaderMatches) {
+                                mame_machine->logerror(
+                                    "P057 native Akai project state rejected before MAME load: %s\n",
+                                    nativeHeaderError.c_str());
+                            } else {
                             // P044: original MAME saves the INTERNAL Akai
                             // m_last_dial (the firmware's endless rotary
                             // encoder reference), but its external analog
@@ -968,9 +998,9 @@ public:
                                     }
                                 }
                             }
-                            mame_machine->immediate_load(
-                                dest.getFullPathName().toStdString());
+                            mame_machine->immediate_load(statePath);
                             issued=true;
+                            } // P057 validated original Akai machine/header signature
                         }
                     }
                 }
@@ -994,8 +1024,10 @@ public:
             if(valid) {
                 juce::FileInputStream read(file);
                 char magic[8]{};
-                valid=read.openedOk() && read.read(magic,8)==8
-                    && std::memcmp(magic,"MAMESAVE",8)==0;
+                std::uint8_t header[32]{};
+                valid=read.openedOk() && read.read(header,32)==32
+                    && akai::machine_state::hasMameHeader(
+                        std::span<const std::uint8_t>(header,32));
             }
             processor->nativeSnapshotSucceeded.store(valid,std::memory_order_release);
             processor->nativeSnapshotFinished.store(nativeSnapshotInFlight.sequence(),
