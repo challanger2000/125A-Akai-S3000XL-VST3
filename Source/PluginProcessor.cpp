@@ -3816,7 +3816,7 @@ void EnsoniqSD1AudioProcessor::setMameFrontendError(const juce::String& message)
     const juce::ScopedLock lock(mameFrontendErrorLock);
     const auto clean = message.trim();
     if (clean.isNotEmpty())
-        mameFrontendError = (mameFrontendError + " " + clean).trim().takeLast(420);
+        mameFrontendError = (mameFrontendError + " " + clean).trim().getLastCharacters(420);
 }
 
 juce::String EnsoniqSD1AudioProcessor::getMameFrontendError() const
