@@ -486,6 +486,20 @@ void EnsoniqSD1AudioProcessorEditor::timerCallback()
         return;
     }
     
+    // If a real MAME frontend startup failed, recover once without asking
+    // the user to remove/reinsert the VST3. Do this only on the GUI thread;
+    // never join or relaunch the emulator from a real-time audio callback.
+    if (!audioProcessor.isMameRunningFlag()
+        && audioProcessor.mameHasStarted.load(std::memory_order_acquire)
+        && audioProcessor.mameLastExitCode.load(std::memory_order_acquire) > 0
+        && !audioProcessor.mameAutomaticRetryAttempted.exchange(
+            true, std::memory_order_acq_rel)) {
+        audioProcessor.shutdownMame();
+        audioProcessor.checkRomAndBootMame();
+        repaint();
+        return;
+    }
+
     // Dynamic Window Aspect Ratio Monitor
     int currentView = audioProcessor.requestedViewIndex.load(std::memory_order_acquire);
     if (currentView != lastView) {
