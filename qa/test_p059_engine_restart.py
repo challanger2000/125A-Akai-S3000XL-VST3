@@ -12,6 +12,7 @@ def valid(proc, header, editor, editor_header):
     start = proc.index("void EnsoniqSD1AudioProcessor::checkRomAndBootMame()")
     frontend = proc.index("int mameResult = frontend->execute(args);")
     worker = proc[frontend:]
+    manual_restart = editor[editor.index("retryEngineButton.onClick = [this]"):editor.index("// SAVE MACRO")]
     prepare = proc[proc.index("void EnsoniqSD1AudioProcessor::prepareToPlay"):start]
     guard = prepare.find('if (hostPath.contains("scanner") || hostPath.contains("validator"))')
     first_boot = prepare.find("if (!mameHasStarted.exchange(true))")
@@ -32,7 +33,7 @@ def valid(proc, header, editor, editor_header):
         "retryEngineButton.onClick = [this]" in editor,
         "mameAutomaticRetryAttempted.exchange(" in editor,
         "audioProcessor.mameLastExitCode.load(std::memory_order_acquire) > 0" in editor,
-        "audioProcessor.shutdownMame();\n        audioProcessor.checkRomAndBootMame();" in editor,
+        "audioProcessor.shutdownMame();\n        audioProcessor.checkRomAndBootMame();" in manual_restart,
         "retryEngineButton.setVisible(!missing && !invalid && !checkFailed" in editor,
         "audioProcessor.getMameFrontendError()" in editor,
         "MAME reported: " in editor,
