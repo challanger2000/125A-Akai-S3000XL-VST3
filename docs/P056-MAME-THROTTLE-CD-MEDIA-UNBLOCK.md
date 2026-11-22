@@ -17,3 +17,14 @@ Extend existing P054 hot-swap ROM-free Python source regression to assert the ex
 - P054 complete original Windows ROM-free VST3: build previously in progress; not evidence of private host behavior.
 - P056 native Windows VST3/Steinberg/125A ROM-free CI: NOT RUN at time of commit.
 - Original owner-ROM private Windows VST3 Studio Pro paused-transport CD insertion, MIDI audio, full DAW state save/reopen: NOT RUN. RELEASE NO-GO.
+
+## Additional exact-source CI and private-package evidence recorded after initial commit
+
+- Original standalone 125A Akai MAME 0.288, authentic V2.0 ROM and owner ISO: hot-inserted image, original DATAENTRY wheel selected HARD-A, 14 Volumes visible, first Volume loaded 4 programs / 18 samples, MIDI Main PCM response. No private bytes uploaded. See P054/P055 firmware report.
+- Two independent fresh original-ROM native MAME instances restored the 1,598,044-byte P055 hot-import full-machine snapshot with **no ISO mounted**, played original MIDI program sweep, and emitted **identical full WAV SHA-256 `d61985eb12a870e0f28229f9cde5c614f3dbc33ec6f92e8269cbc0e6f5109e11`**. CD program slots 1–4 produced nonzero PCM peaks while the factory-control corresponding slots were exactly silent. Evidence is private local, not a public ROM fixture.
+- P054 full Windows ROM-free VST3 Windows 2022 compilation and actual host QA at commit `b8481dd1b304c90ef7b0f2b3cc030b54065e95bb`: GitHub Actions run 45042616057, **SUCCESS**. Steinberg official validator **47 passed, 0 failed**; production 125A Plugin Tester v0.3.2 **54 PASS, 0 WARN, 0 FAIL**, source-run QA artifact inspected.
+- P054 private owner-only VST3 ZIP was assembled locally from the verified public Windows artifact and owner's two original firmware binaries. Independent ZIP CRC, strict moduleinfo JSON, original public PE prefix and both ROM SHA-256 checks PASS; private ZIP SHA256 `50c2eab0ae689f1305e33a5ce7521d4682b1cc05d21235bdefd56af41664db9b`. **Do NOT call this the finished product**; no real Windows ROM-backed Studio Pro runtime or DAW project recall occurred.
+- P056 new CD-throttle unblocking source SHA `ff38ad45faf80389a08ca3973f12a8329ca9114a`, Windows+Ubuntu core CI `45044519171` **SUCCESS**. Exact original Windows ROM-free full build CI `45044519170` was in progress when checked. The fixed throttle branch is newer than the P054 private candidate.
+- Original user expectation: one finished Windows VST3 with internally embedded V2 firmware, no additional programs, reliable original CD/ROM MIDI sound and persistent DAW project recall; no interim artifact or premature final claim.
+
+Current release verdict: **NO-GO**, because the exact P056 owner-private Windows VST3 with original firmware/CD on a real Windows host, stopped transport CD hot-swap, DAW save/close/reopen, missing-media recall, audio comparison and multiple instances is **NOT RUN**. ROM-free CI is only partial assurance.
