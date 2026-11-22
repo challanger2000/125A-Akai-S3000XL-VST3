@@ -192,6 +192,8 @@ public:
     std::atomic<bool> isRomInvalid{ false };
 
     std::atomic<bool> mameHasStarted{ false };
+    // -1: no MAME frontend result yet; >=0: last MAME frontend exit code.
+    std::atomic<int> mameLastExitCode{ -1 };
     std::atomic<double> initialSampleRate{ 0.0 };
     std::atomic<bool> sampleRateMismatch{ false };
     
