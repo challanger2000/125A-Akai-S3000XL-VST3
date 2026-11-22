@@ -86,6 +86,7 @@
 
 #include <iomanip>
 #include <fstream>
+#include <sstream>
 
 // MAME Versioning stubs required by the linker
 extern const char bare_build_version[] = "0.287";
@@ -762,6 +763,18 @@ private:
     
 public:
     
+    // MAME emits the actual fatal CLI/ROM/SCSI reason through osd_printf_error,
+    // even when the emulated machine never reaches OSD init().
+    void output_callback(osd_output_channel channel,
+                         const util::format_argument_pack<char>& args) override {
+        if (channel == OSD_OUTPUT_CHANNEL_ERROR && processor != nullptr) {
+            std::ostringstream stream;
+            util::stream_format(stream, args);
+            processor->setMameFrontendError(juce::String::fromUTF8(stream.str().c_str()));
+        }
+        osd_common_t::output_callback(channel, args);
+    }
+
     virtual void process_events() override {}
     virtual bool has_focus() const override { return true; }
     
@@ -3798,8 +3811,26 @@ bool EnsoniqSD1AudioProcessor::prepareEmbeddedRoms()
 
 
 
+void EnsoniqSD1AudioProcessor::setMameFrontendError(const juce::String& message)
+{
+    const juce::ScopedLock lock(mameFrontendErrorLock);
+    const auto clean = message.trim();
+    if (clean.isNotEmpty())
+        mameFrontendError = (mameFrontendError + " " + clean).trim().takeLast(420);
+}
+
+juce::String EnsoniqSD1AudioProcessor::getMameFrontendError() const
+{
+    const juce::ScopedLock lock(mameFrontendErrorLock);
+    return mameFrontendError;
+}
+
 void EnsoniqSD1AudioProcessor::checkRomAndBootMame()
 {
+    {
+        const juce::ScopedLock lock(mameFrontendErrorLock);
+        mameFrontendError.clear();
+    }
 #ifdef AKAI_EMBED_PRIVATE_ROMS
     // Private build: MAME ROMs come solely from this plugin binary.
     // No Documents ROM folder, third-party install or user file selection.
