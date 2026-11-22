@@ -6,7 +6,7 @@ The original S3000XL firmware boots a virtual `cdrom_2x` at SCSI ID 5 when no HD
 The ISO is a local file. Mechanical two-speed transfer pacing does not add useful physical fidelity when the purpose is to load authentic Akai samples into the unchanged original firmware.
 
 ## Narrow P063 modification
-In `mame-0288-s3000xl-vst.patch`, modify **only** the data-byte pacing inside the existing MAME `nscsi_cdrom_2x_device` from 307,200 B/s to **1,228,800 B/s** (=600 sectors/s, nominal 8x CD rate). This is **4x the old optical transport limit**, not a measured 4x improvement in complete sample loading.
+In `mame-0288-s3000xl-vst.patch`, modify **only** the data-byte pacing inside the existing MAME `nscsi_cdrom_2x_device` from 307,200 B/s to **614,400 B/s** (=300 sectors/s, nominal 4x CD rate). This is **2x the old optical transport limit**, not a measured 2x improvement in complete sample loading.
 
 Retain all the following:
 - Same original `cdrom_2x` MAME device class, SCSI IDs 5/4, `-cdrm` cold boot, virtual vendor/product identity, SCSI commands, command delays and sector read paths.
