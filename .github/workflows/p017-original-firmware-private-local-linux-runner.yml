@@ -1,4 +1,4 @@
-name: P017 - ROM-free native Linux MAME S3000XL for owner-private firmware QA
+name: P049 - ROM-free patched Linux MAME Akai CD-ROM firmware comparison
 on:
   workflow_dispatch:
   push:
@@ -33,6 +33,11 @@ jobs:
           git clone --filter=blob:none --depth 1 --branch mame0288 https://github.com/mamedev/mame.git external/mame
           git -C external/mame apply --check "$GITHUB_WORKSPACE/mame-0288-s3000xl-vst.patch"
           git -C external/mame apply "$GITHUB_WORKSPACE/mame-0288-s3000xl-vst.patch"
+      - name: P049 check real patched MB89352 function and kill old mutant
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python3 scripts/build/test_scsi_temp_read.py --mame-root external/mame
       - name: Build only native patched S3000XL machine and its hardware dependencies
         shell: bash
         run: |
@@ -52,12 +57,12 @@ jobs:
           mkdir -p owner-local-probe
           cp external/mame/s3000xl owner-local-probe/s3000xl
           sha256sum owner-local-probe/s3000xl > owner-local-probe/sha256.txt
-          printf 'ROM-FREE original patched MAME 0.288 Linux executable.\nNO private firmware in CI.\nRun locally with owner-supplied ROM zip only.\n' > owner-local-probe/README.txt
+          printf 'P049 ROM-FREE patched MAME 0.288 Linux diagnostic executable.\nIncludes MB89352 SCSI STATUS backport. NO private firmware in CI.\nRun privately with owner original V2.0 ROM and Akai CD ISO.\n' > owner-local-probe/README.txt
           file owner-local-probe/s3000xl
       - name: Downloadable ROM-free host binary to make PRIVATE local V2.0 boot test possible
         uses: actions/upload-artifact@v4
         with:
-          name: 125A-P017-Linux-Patched-Original-MAME-ROM-FREE
+          name: 125A-P049-Linux-Patched-MAME-ROM-FREE-SCSI-STATUS
           path: owner-local-probe/**
           retention-days: 7
           if-no-files-found: error
