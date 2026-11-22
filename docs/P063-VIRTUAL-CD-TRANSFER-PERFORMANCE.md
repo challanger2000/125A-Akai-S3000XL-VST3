@@ -16,6 +16,20 @@ Retain all the following:
 
 The audio DSP patch itself is **not changed**. Its recorded implementation sets the L7A1045 sample-DMA pacing to 44,100 words/s when not recording, and explicitly describes sample loading becoming **12x slower** compared with the upstream old 64-tick request. This may be the dominant bottleneck after SCSI transfer is accelerated. Do not silently remove this guard: the 64-tick behavior was found to corrupt recording. Any separate non-recording DMA fast path must first be justified and compared against native original-ROM PCM/recording tests.
 
+## Exploratory owner-ROM native Linux transport control (not acceptance)
+
+The owner's exact two original Akai ROMs were extracted **locally only** from their existing privately sealed P062 package and SHA-256 verified against the project's known original-ROM hashes. The owner's exact 542,117,888-byte Akai CD Volume 1 ISO was likewise privately extracted and hash-verified; neither ROM nor ISO is committed or attached to this PR.
+
+For one 8-emulated-second cold-boot experiment per variant, the existing P062 native Linux executable was copied and **only its uniquely occurring compiled `nscsi_cdrom_2x_device::scsi_data_byte_period()` attotime nanosecond constant** was replaced to model 4x or 8x data pacing. A real source build is still necessary. All three used the same input Lua script (LOAD key at emulated 5.2 s, screenshot 7 s) and `-nothrottle`:
+
+| Laboratory pace | Nominal byte rate | Wall time (one run) | MAME average speed | Native screenshot at emulated t=7 s |
+|---|---:|---:|---:|---|
+| Original 2x | 307,200 B/s | 8.78 s | 162.10% | Authentic HARD-A first-volume directory visible |
+| Candidate 4x | 614,400 B/s | 9.20 s | 149.04% | Authentic HARD-A first-volume directory visible |
+| Rejected initial 8x | 1,228,800 B/s | 13.04 s | 86.46% | Original firmware still at waiting-for-hard-disk-ready screen |
+
+This **does not establish statistically robust throughput gains or losses**: each is a single cold-boot/early-directory observation, not an equal-workload F8 full program/sample load, and the original firmware startup timing can vary. However it is sufficient reason **not to promote 8x on theoretical byte-rate grounds alone**. The reduced 4x candidate is deliberately unaccepted until repeated full owner-ISO loading/PCM/DAW recall proves a real wall-clock improvement. The local laboratory executable copies are not release binaries.
+
 ## Automated regression
 - `qa/test_p063_fast_cd_transport.py`: checks exact CD-only hunk, device class, new rate, speed-only contents, plus six deliberately broken mutations.
 - `mame-patch-check.yml`: checks exact patch applies to pinned clean MAME 0.288, now also checking `src/devices/bus/nscsi/cd.cpp`.
