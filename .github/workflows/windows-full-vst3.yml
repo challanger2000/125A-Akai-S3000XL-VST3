@@ -43,6 +43,10 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "MAME patch is not applicable" }
           git -C external/mame apply "$env:GITHUB_WORKSPACE/mame-0288-s3000xl-vst.patch"
           if ($LASTEXITCODE -ne 0) { throw "MAME patch application failed" }
+      - name: P049 MB89352 STATUS original-function regression
+        shell: msys2 {0}
+        run: |
+          /mingw64/bin/python.exe scripts/build/test_scsi_temp_read.py --mame-root external/mame
       - name: Patch JUCE VST3 callback lock to nonblocking try-lock
         shell: pwsh
         run: |

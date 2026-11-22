@@ -3339,3 +3339,18 @@ diff --git a/src/lib/formats/flopimg.h b/src/lib/formats/flopimg.h
  #include <cassert>
  #include <cstddef>
  #include <cstdint>
+diff --git a/src/devices/machine/mb87030.cpp b/src/devices/machine/mb87030.cpp
+--- a/src/devices/machine/mb87030.cpp
++++ b/src/devices/machine/mb87030.cpp
+@@ -856,6 +856,11 @@ uint8_t mb87030_device::temp_r()
+ uint8_t mb87030_device::temp_r()
+ {
++	uint8_t ctrl = m_scsi_bus->ctrl_r();
+ 	step(false);
++	if ((m_pctl & PCTL_PHASE_MASK) == S_PHASE_STATUS && (ctrl & (S_INP | S_REQ)) == (S_INP | S_REQ))
++	{
++		m_temp = m_scsi_bus->data_r();
++	}
+ 	LOG("%s: %02X\n", __FUNCTION__, m_temp);
+ 	return m_temp;
+ }
