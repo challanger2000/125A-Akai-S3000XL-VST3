@@ -208,6 +208,22 @@ EnsoniqSD1AudioProcessorEditor::EnsoniqSD1AudioProcessorEditor (EnsoniqSD1AudioP
     addAndMakeVisible(rescanRomButton);
     rescanRomButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xffaa5500));
     rescanRomButton.onClick = [this] { audioProcessor.checkRomAndBootMame(); repaint(); };
+
+    // Recovery is only offered after the MAME frontend has returned.
+    addAndMakeVisible(retryEngineButton);
+    retryEngineButton.setVisible(false);
+    retryEngineButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff303840));
+    retryEngineButton.setColour(juce::TextButton::textColourOffId, juce::Colours::white);
+    retryEngineButton.setWantsKeyboardFocus(false);
+    retryEngineButton.setTooltip("Restart the internal Akai emulator without removing the VST3");
+    retryEngineButton.onClick = [this] {
+        if (audioProcessor.isMameRunningFlag()
+            || audioProcessor.initialSampleRate.load(std::memory_order_acquire) <= 0.0)
+            return;
+        audioProcessor.shutdownMame();
+        audioProcessor.checkRomAndBootMame();
+        repaint();
+    };
     
     // SAVE MACRO
     saveBadge.setButtonText(""); // Text and icon will be drawn natively in paint()
@@ -513,6 +529,10 @@ void EnsoniqSD1AudioProcessorEditor::timerCallback()
     rescanRomButton.setVisible(missing);
     locateRomButton.setButtonText("Locate ROMs...");
     rescanRomButton.setButtonText("Rescan ROMs Folder");
+    retryEngineButton.setVisible(!missing && !invalid && !checkFailed && !unsupportedHost
+        && !audioProcessor.isMameRunningFlag()
+        && audioProcessor.mameHasStarted.load(std::memory_order_acquire)
+        && audioProcessor.initialSampleRate.load(std::memory_order_acquire) > 0.0);
 
     // Check if File Manager is opened
     bool isFileManagerOpen = (audioProcessor.requestedViewIndex.load(std::memory_order_acquire) == 4);
@@ -616,7 +636,14 @@ void EnsoniqSD1AudioProcessorEditor::paint (juce::Graphics& g)
         g.setColour(juce::Colours::red);
         g.setFont(22.0f);
 
-        juce::String msg = "S3000XL-VST - S3000XL Emulation (MAME(R))\n\nMAME(R) Engine Offline\n\nThe emulator is halted or waiting for the host's audio engine.\n\nIf your DAW is currently scanning plugins, this is normal.\nIf the emulator crashed or failed to start, please reload the plugin!";
+        const int exitCode = audioProcessor.mameLastExitCode.load(std::memory_order_acquire);
+        juce::String msg = "125A Akai S3000XL - MAME Engine Offline\\n\\n";
+        if (exitCode >= 0)
+            msg += "MAME frontend exited (code " + juce::String(exitCode)
+                + ").\\nPress Restart engine below; no DAW reload is required.";
+        else
+            msg += "Waiting for host activation or internal startup.\\n"
+                   "If startup failed, press Restart engine below.";
         g.drawFittedText(msg, getLocalBounds().reduced(20), juce::Justification::centred, 10);
         return;
     }
@@ -871,7 +898,14 @@ void EnsoniqSD1AudioProcessorEditor::paint (juce::Graphics& g)
         g.setColour(juce::Colours::red);
         g.setFont(22.0f);
 
-        juce::String msg = "S3000XL-VST - S3000XL Emulation (MAME(R))\n\nMAME(R) Engine Offline\n\nThe emulator is halted or waiting for the host's audio engine.\n\nIf your DAW is currently scanning plugins, this is normal.\nIf the emulator crashed or failed to start, please reload the plugin!";
+        const int exitCode = audioProcessor.mameLastExitCode.load(std::memory_order_acquire);
+        juce::String msg = "125A Akai S3000XL - MAME Engine Offline\\n\\n";
+        if (exitCode >= 0)
+            msg += "MAME frontend exited (code " + juce::String(exitCode)
+                + ").\\nPress Restart engine below; no DAW reload is required.";
+        else
+            msg += "Waiting for host activation or internal startup.\\n"
+                   "If startup failed, press Restart engine below.";
         g.drawFittedText(msg, getLocalBounds().reduced(20), juce::Justification::centred, 10);
         return;
     }
@@ -1143,6 +1177,10 @@ void EnsoniqSD1AudioProcessorEditor::resized()
     const auto& setup = rackControls.settings;
     loadMediaButton.setBounds(media.x, media.y, media.w, media.h);
     settingsButton.setBounds(setup.x, setup.y, setup.w, setup.h);
+    const int retryWidth = juce::jlimit(160, 230, getWidth() / 7);
+    retryEngineButton.setBounds((getWidth() - retryWidth) / 2,
+        juce::roundToInt(getHeight() * 0.85f), retryWidth,
+        juce::jlimit(24, 32, getHeight() / 12));
 
     // Place the invisible, clickable hotspot exactly over the drawn save badge
     saveBadge.setBounds(juce::roundToInt(saveX * scaleX), juce::roundToInt(saveY * scaleY),
